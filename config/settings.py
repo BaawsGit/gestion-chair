@@ -8,7 +8,11 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "local-only-change-me-before-deployment")
 DEBUG = os.environ.get("DJANGO_DEBUG", "1").lower() in {"1", "true", "yes"}
-ALLOWED_HOSTS = [host.strip() for host in os.environ.get("DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost").split(",") if host.strip()]
+ALLOWED_HOSTS = [
+    '127.0.0.1',
+    'localhost',
+    '.vercel.app',  # Autorise tous les sous-domaines vercel.app
+]
 if ".vercel.app" not in ALLOWED_HOSTS:
     ALLOWED_HOSTS.extend([".vercel.app", "localhost", "127.0.0.1"])
 if os.environ.get("VERCEL_URL") and os.environ.get("VERCEL_URL") not in ALLOWED_HOSTS:

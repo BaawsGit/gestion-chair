@@ -1,0 +1,192 @@
+{% extends 'base.html' %}
+{% block title %}Bilan de Production · {{ batch.name }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="page-header-info">
+    <div class="d-flex align-items-center gap-2">
+      <span class="page-tag"><i class="bi bi-file-earmark-bar-graph text-success"></i> RAPPORT DE CLÔTURE</span>
+      <span class="app-badge badge-neutral-soft fw-bold">{{ batch.name }}</span>
+    </div>
+    <h1 class="page-title">Bilan Financier & Technique</h1>
+    <p class="page-subtitle">
+      <span>Cycle démarré le {{ batch.start_date|date:'d/m/Y' }}</span>
+      <span>•</span>
+      <span>Durée : {{ batch.current_age_days }} jour(s)</span>
+      <span>•</span>
+      <span>Statut : <strong>{{ batch.get_status_display }}</strong></span>
+    </p>
+  <div class="page-header-actions">
+    <a class="btn-app-secondary" href="{% url 'batch-edit' batch.pk %}">
+      <i class="bi bi-pencil"></i>
+      <span>Modifier les paramètres</span>
+    </a>
+    {% if batch.status == 'active' %}
+    <a class="btn-app-secondary" href="{% url 'dashboard' %}">
+      <i class="bi bi-arrow-left"></i>
+      <span>Retour au lot en cours</span>
+    </a>
+    {% else %}
+    <a class="btn-app-secondary" href="{% url 'batch-history' %}">
+      <i class="bi bi-arrow-left"></i>
+      <span>Historique des lots</span>
+    </a>
+    {% endif %}
+  </div>
+</div>
+
+<!-- 6 Financial & Performance Metric Cards -->
+<div class="row g-4 mb-4">
+  <div class="col-sm-6 col-lg-4">
+    <article class="kpi-card kpi-card-amber">
+      <div class="kpi-top">
+        <span class="kpi-label">Chiffre d'Affaires</span>
+        <div class="kpi-icon"><i class="bi bi-cash-stack"></i></div>
+      </div>
+      <div class="kpi-value text-warning-emphasis">{{ financials.revenue|floatformat:0 }} <small class="fs-6 text-muted">FCFA</small></div>
+      <div class="kpi-footer"><span class="app-badge badge-warning-soft">Total encaissé / facturé</span></div>
+    </article>
+  </div>
+
+  <div class="col-sm-6 col-lg-4">
+    <article class="kpi-card kpi-card-rose">
+      <div class="kpi-top">
+        <span class="kpi-label">Charges Opérationnelles</span>
+        <div class="kpi-icon"><i class="bi bi-receipt"></i></div>
+      </div>
+      <div class="kpi-value text-danger">{{ financials.direct_costs|floatformat:0 }} <small class="fs-6 text-muted">FCFA</small></div>
+      <div class="kpi-footer">
+        <span class="app-badge badge-danger-soft">
+          Dont poussins facturés : {{ batch.chick_cost|floatformat:0 }} FCFA
+        </span>
+      </div>
+    </article>
+  </div>
+
+  <div class="col-sm-6 col-lg-4">
+    <article class="kpi-card kpi-card-indigo">
+      <div class="kpi-top">
+        <span class="kpi-label">Amortissement Matériel</span>
+        <div class="kpi-icon"><i class="bi bi-building"></i></div>
+      </div>
+      <div class="kpi-value">{{ financials.amortization|floatformat:0 }} <small class="fs-6 text-muted">FCFA</small></div>
+      <div class="kpi-footer"><span class="app-badge badge-neutral-soft">Au prorata du cycle</span></div>
+    </article>
+  </div>
+
+  <div class="col-sm-6 col-lg-4">
+    <article class="kpi-card kpi-card-emerald">
+      <div class="kpi-top">
+        <span class="kpi-label">Bénéfice Net Réalisé</span>
+        <div class="kpi-icon"><i class="bi bi-graph-up-arrow"></i></div>
+      </div>
+      <div class="kpi-value {% if financials.net >= 0 %}text-success{% else %}text-danger{% endif %}">
+        {{ financials.net|floatformat:0 }} <small class="fs-6 text-muted">FCFA</small>
+      </div>
+      <div class="kpi-footer">
+        <span class="app-badge {% if financials.net >= 0 %}badge-success-soft{% else %}badge-danger-soft{% endif %}">
+          Marge globale de la bande
+        </span>
+      </div>
+    </article>
+  </div>
+
+  <div class="col-sm-6 col-lg-4">
+    <article class="kpi-card">
+      <div class="kpi-top">
+        <span class="kpi-label">Coût de Revient Unitaire</span>
+        <div class="kpi-icon bg-light text-dark"><i class="bi bi-tag-fill"></i></div>
+      </div>
+      <div class="kpi-value">{{ unit_cost|default:'—'|floatformat:0 }} <small class="fs-6 text-muted">FCFA</small></div>
+      <div class="kpi-footer"><span class="text-muted">Par sujet produit vivant</span></div>
+    </article>
+  </div>
+
+  <div class="col-sm-6 col-lg-4">
+    <article class="kpi-card">
+      <div class="kpi-top">
+        <span class="kpi-label">Marge Nette par Sujet</span>
+        <div class="kpi-icon bg-light text-success"><i class="bi bi-award-fill"></i></div>
+      </div>
+      <div class="kpi-value text-success">{{ margin_per_bird|default:'—'|floatformat:0 }} <small class="fs-6 text-muted">FCFA</small></div>
+      <div class="kpi-footer"><span class="text-muted">Par poulet commercialisé</span></div>
+    </article>
+  </div>
+</div>
+
+<!-- Technical & Avicultural Metrics -->
+<div class="app-card mb-4">
+  <div class="card-header-clean">
+    <h2 class="card-title-clean">
+      <i class="bi bi-speedometer2"></i>
+      <span>Indicateurs zootechniques de la bande</span>
+    </h2>
+  </div>
+
+  <div class="row g-4 text-center">
+    <div class="col-6 col-lg-3">
+      <div class="p-3 rounded-3 bg-light border">
+        <div class="text-muted small fw-semibold text-uppercase">Poussins Reçus</div>
+        <div class="display-6 fw-bold text-dark mt-1">{{ batch.initial_quantity }}</div>
+        <div class="small text-muted mt-1">
+          {% if batch.bonus_quantity > 0 %}
+            <span class="text-success fw-semibold">{{ batch.ordered_quantity }} facturés + {{ batch.bonus_quantity }} bonus</span>
+          {% else %}
+            <span>{{ batch.ordered_quantity|default:batch.initial_quantity }} facturés</span>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-lg-3">
+      <div class="p-3 rounded-3 bg-light border">
+        <div class="text-muted small fw-semibold text-uppercase">Pertes / Décès</div>
+        <div class="display-6 fw-bold text-danger mt-1">{{ batch.deaths_count }}</div>
+      </div>
+    </div>
+    <div class="col-6 col-lg-3">
+      <div class="p-3 rounded-3 bg-light border">
+        <div class="text-muted small fw-semibold text-uppercase">Poulets Vendus</div>
+        <div class="display-6 fw-bold text-success mt-1">{{ batch.sold_count }}</div>
+      </div>
+    </div>
+    <div class="col-6 col-lg-3">
+      <div class="p-3 rounded-3 bg-light border">
+        <div class="text-muted small fw-semibold text-uppercase">Mortalité Totale</div>
+        <div class="display-6 fw-bold {% if batch.mortality_rate < 5 %}text-success{% else %}text-danger{% endif %} mt-1">
+          {{ batch.mortality_rate }}%
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Closeout Confirmation or New Batch Button -->
+{% if close_confirmation %}
+<div class="app-card border-danger border-opacity-50">
+  <div class="d-flex align-items-center gap-2 mb-2 text-danger">
+    <i class="bi bi-exclamation-triangle-fill fs-4"></i>
+    <h3 class="fs-5 fw-bold mb-0">Confirmer la clôture du lot</h3>
+  </div>
+  <p class="text-muted small mb-4">
+    Le lot sera marqué comme « Clôturé ». Toutes les données (mortalité, dépenses, ventes, traitements) restent consultables dans l'historique et dans ce rapport. Vous pourrez immédiatement démarrer un nouveau lot.
+  </p>
+  <form method="post" class="d-flex align-items-center gap-3">
+    {% csrf_token %}
+    <button type="submit" class="btn-app-danger">
+      <i class="bi bi-lock-fill"></i>
+      <span>Confirmer et clôturer définitivement</span>
+    </button>
+    <a class="btn-app-secondary" href="{% url 'dashboard' %}">
+      <span>Annuler</span>
+    </a>
+  </form>
+</div>
+{% else %}
+<div class="text-end">
+  <a class="btn-app-primary" href="{% url 'batch-create' %}">
+    <i class="bi bi-plus-lg"></i>
+    <span>Lancer un nouveau lot</span>
+  </a>
+</div>
+{% endif %}
+{% endblock %}

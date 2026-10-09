@@ -1,0 +1,262 @@
+{% extends 'base.html' %}
+{% block title %}{{ title }} · Gestion Chair{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="page-header-info">
+    <div class="d-flex align-items-center gap-2">
+      <span class="page-tag"><i class="bi bi-collection text-success"></i> GESTION DES BANDES</span>
+    </div>
+    <h1 class="page-title">{{ title }}</h1>
+    <p class="page-subtitle">Configurez le cycle de production, les effectifs reçus et les paramètres d'achat du couvoir.</p>
+  </div>
+  <div class="page-header-actions">
+    {% if is_edit %}
+      <a class="btn-app-secondary" href="{% url 'batch-history' %}">
+        <i class="bi bi-arrow-left"></i>
+        <span>Retour à l'historique</span>
+      </a>
+    {% else %}
+      <a class="btn-app-secondary" href="{% url 'dashboard' %}">
+        <i class="bi bi-arrow-left"></i>
+        <span>Retour au tableau de bord</span>
+      </a>
+    {% endif %}
+  </div>
+</div>
+
+<form method="post" class="app-form-card" id="batchForm">
+  {% csrf_token %}
+
+  {% if form.non_field_errors %}
+  <div class="app-alert app-alert-danger mb-4">
+    <i class="bi bi-exclamation-triangle-fill fs-5 text-danger"></i>
+    <div>{{ form.non_field_errors }}</div>
+  </div>
+  {% endif %}
+
+  <!-- Section 1 : Informations générales du lot -->
+  <div class="p-3 mb-4 rounded-3 bg-light border">
+    <h2 class="h6 fw-bold text-dark mb-3 d-flex align-items-center gap-2">
+      <i class="bi bi-info-circle-fill text-primary"></i>
+      <span>1. Identification & Calendrier du Lot</span>
+    </h2>
+    <div class="row g-3">
+      <div class="col-md-6">
+        <label class="form-label" for="{{ form.name.id_for_label }}">
+          {{ form.name.label }} <span class="text-danger">*</span>
+        </label>
+        {{ form.name }}
+        {% if form.name.help_text %}
+          <div class="form-text">{{ form.name.help_text }}</div>
+        {% endif %}
+        {% for error in form.name.errors %}
+          <div class="form-errors"><i class="bi bi-exclamation-circle me-1"></i> {{ error }}</div>
+        {% endfor %}
+      </div>
+
+      <div class="col-md-3">
+        <label class="form-label" for="{{ form.start_date.id_for_label }}">
+          {{ form.start_date.label }} <span class="text-danger">*</span>
+        </label>
+        {{ form.start_date }}
+        {% if form.start_date.help_text %}
+          <div class="form-text">{{ form.start_date.help_text }}</div>
+        {% endif %}
+        {% for error in form.start_date.errors %}
+          <div class="form-errors"><i class="bi bi-exclamation-circle me-1"></i> {{ error }}</div>
+        {% endfor %}
+      </div>
+
+      <div class="col-md-3">
+        <label class="form-label" for="{{ form.target_duration_days.id_for_label }}">
+          {{ form.target_duration_days.label }} <span class="text-danger">*</span>
+        </label>
+        {{ form.target_duration_days }}
+        {% if form.target_duration_days.help_text %}
+          <div class="form-text">{{ form.target_duration_days.help_text }}</div>
+        {% endif %}
+        {% for error in form.target_duration_days.errors %}
+          <div class="form-errors"><i class="bi bi-exclamation-circle me-1"></i> {{ error }}</div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Section 2 : Commande couvoir, Effectif & Bonus -->
+  <div class="p-3 mb-4 rounded-3 border" style="background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);">
+    <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+      <h2 class="h6 fw-bold text-dark mb-0 d-flex align-items-center gap-2">
+        <i class="bi bi-egg-fried text-warning"></i>
+        <span>2. Commande Couvoir & Décomposition des Sujets</span>
+      </h2>
+      <button type="button" class="btn btn-sm btn-outline-success" id="btnAutoBonus" title="Règle couvoir usuelle : 1 poussin offert par tranche de 50 commandés">
+        <i class="bi bi-magic me-1"></i> Calculer bonus (1 pour 50)
+      </button>
+    </div>
+
+    <div class="row g-3">
+      <div class="col-md-4">
+        <label class="form-label fw-bold text-dark" for="{{ form.ordered_quantity.id_for_label }}">
+          <i class="bi bi-cart-check text-primary me-1"></i> {{ form.ordered_quantity.label }} <span class="text-danger">*</span>
+        </label>
+        {{ form.ordered_quantity }}
+        <div class="form-text">Nombre de poussins payants facturés.</div>
+        {% for error in form.ordered_quantity.errors %}
+          <div class="form-errors"><i class="bi bi-exclamation-circle me-1"></i> {{ error }}</div>
+        {% endfor %}
+      </div>
+
+      <div class="col-md-4">
+        <label class="form-label fw-bold text-dark" for="{{ form.unit_cost_chick.id_for_label }}">
+          <i class="bi bi-currency-exchange text-success me-1"></i> {{ form.unit_cost_chick.label }} <span class="text-danger">*</span>
+        </label>
+        {{ form.unit_cost_chick }}
+        <div class="form-text">Prix facturé par poussin commandé.</div>
+        {% for error in form.unit_cost_chick.errors %}
+          <div class="form-errors"><i class="bi bi-exclamation-circle me-1"></i> {{ error }}</div>
+        {% endfor %}
+      </div>
+
+      <div class="col-md-4">
+        <label class="form-label fw-bold text-success" for="{{ form.bonus_quantity.id_for_label }}">
+          <i class="bi bi-gift-fill text-warning me-1"></i> {{ form.bonus_quantity.label }}
+        </label>
+        {{ form.bonus_quantity }}
+        <div class="form-text text-success">Sujets offerts sans coût (0 FCFA).</div>
+        {% for error in form.bonus_quantity.errors %}
+          <div class="form-errors"><i class="bi bi-exclamation-circle me-1"></i> {{ error }}</div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- Live Preview Card -->
+    <div class="mt-4 p-3 rounded-3 bg-white border shadow-sm">
+      <div class="d-flex align-items-center justify-content-between mb-2 pb-2 border-bottom">
+        <span class="fw-bold text-dark small text-uppercase">
+          <i class="bi bi-calculator me-1 text-primary"></i> Synthèse automatique en direct
+        </span>
+        <span class="badge bg-success-subtle text-success border border-success-subtle">
+          Coût bonus : 0 FCFA
+        </span>
+      </div>
+
+      <div class="row g-3 text-center">
+        <div class="col-6 col-md-3">
+          <div class="small text-muted">Sujets Payants</div>
+          <div class="fs-5 fw-bold text-dark" id="previewOrdered">0</div>
+        </div>
+        <div class="col-6 col-md-3">
+          <div class="small text-muted">Bonus Offerts (Ajout)</div>
+          <div class="fs-5 fw-bold text-success" id="previewBonus">+0</div>
+        </div>
+        <div class="col-6 col-md-3">
+          <div class="small text-muted">Effectif Démarré Total</div>
+          <div class="fs-5 fw-bold text-primary" id="previewTotal">0 sujets</div>
+        </div>
+        <div class="col-6 col-md-3">
+          <div class="small text-muted">Montant Facturé Couvoir</div>
+          <div class="fs-5 fw-bold text-danger" id="previewCost">0 FCFA</div>
+        </div>
+      </div>
+
+      <div class="mt-3 pt-2 border-top small text-muted d-flex align-items-center justify-content-between flex-wrap gap-2">
+        <div>
+          <i class="bi bi-check-circle-fill text-success me-1"></i>
+          Coût moyen réel par sujet démarré : <strong class="text-dark" id="previewEffectiveUnit">0 FCFA</strong>
+        </div>
+        <div class="text-muted fst-italic">
+          Formule : <span class="text-dark">Quantité commandée × Prix unitaire</span> (les bonus ne coûtent rien)
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Section 3 : Remarques & Notes -->
+  <div class="mb-4">
+    <label class="form-label" for="{{ form.notes.id_for_label }}">
+      {{ form.notes.label }}
+    </label>
+    {{ form.notes }}
+    {% if form.notes.help_text %}
+      <div class="form-text">{{ form.notes.help_text }}</div>
+    {% endif %}
+    {% for error in form.notes.errors %}
+      <div class="form-errors"><i class="bi bi-exclamation-circle me-1"></i> {{ error }}</div>
+    {% endfor %}
+  </div>
+
+  <div class="d-flex align-items-center gap-3 pt-3 border-top">
+    <button class="btn-app-primary" type="submit">
+      <i class="bi bi-check-lg"></i>
+      <span>{{ submit_label|default:'Enregistrer' }}</span>
+    </button>
+    {% if is_edit %}
+      <a class="btn-app-secondary" href="{% url 'batch-history' %}">
+        <span>Annuler</span>
+      </a>
+    {% else %}
+      <a class="btn-app-secondary" href="{% url 'dashboard' %}">
+        <span>Annuler</span>
+      </a>
+    {% endif %}
+  </div>
+</form>
+
+<script>
+  document.addEventListener('DOMContentLoaded', function () {
+    const orderedInput = document.getElementById('id_ordered_quantity');
+    const unitCostInput = document.getElementById('id_unit_cost_chick');
+    const bonusInput = document.getElementById('id_bonus_quantity');
+    const btnAutoBonus = document.getElementById('btnAutoBonus');
+
+    const previewOrdered = document.getElementById('previewOrdered');
+    const previewBonus = document.getElementById('previewBonus');
+    const previewTotal = document.getElementById('previewTotal');
+    const previewCost = document.getElementById('previewCost');
+    const previewEffectiveUnit = document.getElementById('previewEffectiveUnit');
+
+    function formatNumber(num) {
+      return new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 2 }).format(num);
+    }
+
+    function recalculate() {
+      const ordered = Math.max(0, parseInt(orderedInput?.value, 10) || 0);
+      const bonus = Math.max(0, parseInt(bonusInput?.value, 10) || 0);
+      const unitCost = Math.max(0, parseFloat(unitCostInput?.value) || 0);
+
+      const totalStarted = ordered + bonus;
+      const totalCost = ordered * unitCost;
+      const effectiveUnitCost = totalStarted > 0 ? (totalCost / totalStarted) : unitCost;
+
+      if (previewOrdered) previewOrdered.textContent = formatNumber(ordered) + ' sujets';
+      if (previewBonus) previewBonus.textContent = '+' + formatNumber(bonus) + ' gratuits';
+      if (previewTotal) previewTotal.textContent = formatNumber(totalStarted) + ' sujets';
+      if (previewCost) previewCost.textContent = formatNumber(Math.round(totalCost)) + ' FCFA';
+      if (previewEffectiveUnit) previewEffectiveUnit.textContent = formatNumber(Math.round(effectiveUnitCost * 100) / 100) + ' FCFA / sujet';
+    }
+
+    if (btnAutoBonus) {
+      btnAutoBonus.addEventListener('click', function () {
+        const ordered = Math.max(0, parseInt(orderedInput?.value, 10) || 0);
+        // Règle avicole habituelle : 1 sujet bonus par tranche complète de 50 sujets commandés
+        const suggestedBonus = Math.floor(ordered / 50);
+        if (bonusInput) {
+          bonusInput.value = suggestedBonus;
+          recalculate();
+        }
+      });
+    }
+
+    [orderedInput, unitCostInput, bonusInput].forEach(function (el) {
+      if (el) {
+        el.addEventListener('input', recalculate);
+        el.addEventListener('change', recalculate);
+      }
+    });
+
+    // Calcul initial
+    recalculate();
+  });
+</script>
+{% endblock %}

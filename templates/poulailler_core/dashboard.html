@@ -1,0 +1,549 @@
+{% extends 'base.html' %}
+{% block title %}Tableau de bord · {{ batch.name|default:'Ferme' }}{% endblock %}
+
+{% block content %}
+{% if not batch %}
+  <div class="page-header">
+    <div class="page-header-info">
+      <span class="page-tag"><i class="bi bi-compass"></i> Vue d'ensemble</span>
+      <h1 class="page-title">Bienvenue sur Gestion Chair</h1>
+      <p class="page-subtitle">Aucun lot de poulets n'est actuellement actif sur votre ferme.</p>
+    </div>
+  </div>
+
+  <div class="app-card text-center py-5">
+    <div class="mb-3">
+      <div class="brand-icon mx-auto" style="width: 64px; height: 64px; font-size: 2rem;">
+        <i class="bi bi-egg-fried"></i>
+      </div>
+    </div>
+    <h3 class="fw-bold mb-2">Démarrez votre premier cycle de production</h3>
+    <p class="text-muted mx-auto mb-4" style="max-width: 500px;">
+      Créez un nouveau lot en indiquant la date d'arrivée des poussins et leur effectif. Le programme de soins prophylactiques et le suivi des stocks seront générés automatiquement.
+    </p>
+    <a class="btn-app-primary d-inline-flex" href="{% url 'batch-create' %}">
+      <i class="bi bi-plus-circle-fill"></i>
+      <span>Créer un nouveau lot</span>
+    </a>
+  </div>
+{% else %}
+
+<!-- Page Header & Action Bar -->
+<div class="page-header">
+  <div class="page-header-info">
+    <div class="d-flex align-items-center gap-2">
+      <span class="page-tag"><i class="bi bi-record-circle-fill text-success"></i> LOT ACTIF</span>
+      <span class="app-badge badge-success-soft fw-bold">{{ batch.name }}</span>
+    </div>
+    <h1 class="page-title">Tableau de bord de l'élevage</h1>
+    <p class="page-subtitle">
+      <span><i class="bi bi-calendar3 me-1"></i> Arrivée le {{ batch.start_date|date:'d/m/Y' }}</span>
+      <span>•</span>
+      <span><i class="bi bi-clock me-1"></i> Jour <strong>{{ batch.current_age_days }}</strong> / {{ batch.target_duration_days }} jours</span>
+    </p>
+  </div>
+
+  <div class="page-header-actions">
+    {% if all_batches|length > 1 %}
+    <form method="get" class="d-inline-flex align-items-center me-2">
+      <div class="input-group input-group-sm">
+        <span class="input-group-text bg-white border-end-0 text-muted"><i class="bi bi-layers"></i></span>
+        <select name="batch" class="form-select border-start-0 ps-1" onchange="this.form.submit()">
+          {% for b in all_batches %}
+            <option value="{{ b.pk }}" {% if b.pk == batch.pk %}selected{% endif %}>
+              {{ b.name }} ({{ b.get_status_display }})
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+    </form>
+    {% endif %}
+
+    <a class="btn-app-secondary" href="{% url 'daily-entry' %}">
+      <i class="bi bi-calendar2-plus"></i>
+      <span>Journal du jour</span>
+    </a>
+
+    <a class="btn-app-secondary" href="{% url 'batch-edit' batch.pk %}" title="Modifier les effectifs, bonus et prix du lot">
+      <i class="bi bi-sliders"></i>
+      <span>Paramètres lot</span>
+    </a>
+
+    <a class="btn-app-primary" href="{% url 'sale-create' %}">
+      <i class="bi bi-cart-plus"></i>
+      <span>Nouvelle vente</span>
+    </a>
+
+    {% if batch.status == 'active' %}
+      <a class="btn-app-danger" href="{% url 'batch-close' batch.pk %}">
+        <i class="bi bi-check2-circle"></i>
+        <span>Clôturer le lot</span>
+      </a>
+    {% else %}
+      <a class="btn-app-secondary" href="{% url 'batch-report' batch.pk %}">
+        <i class="bi bi-file-earmark-bar-graph"></i>
+        <span>Bilan du lot</span>
+      </a>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Production Cycle Progress Banner -->
+<div class="cycle-banner">
+  <div class="cycle-banner-content">
+    <div class="cycle-header">
+      <div class="d-flex align-items-center gap-2">
+        <div class="cycle-badge">
+          <i class="bi bi-activity me-1"></i>
+          {% if batch.current_age_days <= 14 %}
+            Phase 1 : Démarrage (J1-J14)
+          {% elif batch.current_age_days <= 28 %}
+            Phase 2 : Croissance (J15-J28)
+          {% else %}
+            Phase 3 : Finition & Vente (J29-J{{ batch.target_duration_days }})
+          {% endif %}
+        </div>
+        <span class="small fw-semibold text-white-50">Durée cible standard : 45 jours</span>
+      </div>
+      <div class="text-end">
+        <span class="fs-5 fw-bold text-white">J{{ batch.current_age_days }}</span>
+        <span class="text-white-50 small"> / {{ batch.target_duration_days }} jours</span>
+      </div>
+    </div>
+
+    <!-- Cycle Dynamic Progress Bar -->
+    <div class="cycle-progress-wrap">
+      {% widthratio batch.current_age_days batch.target_duration_days 100 as progress_pct %}
+      <div class="cycle-progress-bar">
+        <div class="cycle-progress-fill" style="width: {% if progress_pct|add:0 > 100 %}100{% else %}{{ progress_pct|default:0 }}{% endif %}%;"></div>
+      </div>
+    </div>
+
+    <div class="cycle-steps">
+      <span><i class="bi bi-check-circle me-1"></i> J1 Démarrage</span>
+      <span><i class="bi bi-lightning-charge me-1"></i> J15 Croissance</span>
+      <span><i class="bi bi-award me-1"></i> J29 Finition</span>
+      <span><i class="bi bi-flag me-1"></i> J{{ batch.target_duration_days }} Clôture & Vente</span>
+    </div>
+  </div>
+</div>
+
+<!-- 4 Key Metrics (KPIs) -->
+<section class="metrics-row" aria-label="Indicateurs clés du lot">
+  <!-- Stock vivant -->
+  <article class="kpi-card kpi-card-emerald">
+    <div class="kpi-top">
+      <span class="kpi-label">Effectif Vivant</span>
+      <div class="kpi-icon">
+        <i class="bi bi-feather"></i>
+      </div>
+    </div>
+    <div class="kpi-value">{{ batch.current_stock }}</div>
+    <div class="kpi-footer flex-wrap gap-1">
+      <span class="app-badge badge-success-soft">
+        <i class="bi bi-shield-check"></i>
+        sur {{ batch.initial_quantity }} reçus
+        {% if batch.bonus_quantity > 0 %}
+          <span class="ms-1">({{ batch.ordered_quantity }} payés + {{ batch.bonus_quantity }} bonus)</span>
+        {% endif %}
+      </span>
+      {% if batch.sold_count > 0 %}
+      <span class="text-muted ms-auto">{{ batch.sold_count }} vendu(s)</span>
+      {% endif %}
+    </div>
+  </article>
+
+  <!-- Mortalité -->
+  <article class="kpi-card kpi-card-rose">
+    <div class="kpi-top">
+      <span class="kpi-label">Taux de Mortalité</span>
+      <div class="kpi-icon">
+        <i class="bi bi-heart-pulse"></i>
+      </div>
+    </div>
+    <div class="kpi-value text-danger">{{ batch.mortality_rate }}%</div>
+    <div class="kpi-footer">
+      <span class="app-badge badge-danger-soft">
+        <i class="bi bi-exclamation-circle"></i>
+        {{ batch.deaths_count }} perte(s) au total
+      </span>
+      <span class="text-muted ms-auto">Cible &lt; 5%</span>
+    </div>
+  </article>
+
+  <!-- Chiffre d'Affaires -->
+  <article class="kpi-card kpi-card-amber">
+    <div class="kpi-top">
+      <span class="kpi-label">Chiffre d'Affaires</span>
+      <div class="kpi-icon">
+        <i class="bi bi-cash-stack"></i>
+      </div>
+    </div>
+    <div class="kpi-value text-warning-emphasis">{{ financials.revenue|floatformat:0 }} <small class="fs-6 text-muted">FCFA</small></div>
+    <div class="kpi-footer">
+      <span class="app-badge badge-warning-soft">
+        <i class="bi bi-receipt"></i>
+        Ventes enregistrées
+      </span>
+    </div>
+  </article>
+
+  <!-- Résultat Net Estimé -->
+  <article class="kpi-card kpi-card-indigo">
+    <div class="kpi-top">
+      <span class="kpi-label">Résultat Net Actuel</span>
+      <div class="kpi-icon">
+        <i class="bi bi-graph-up-arrow"></i>
+      </div>
+    </div>
+    <div class="kpi-value {% if financials.net >= 0 %}text-success{% else %}text-secondary{% endif %}">
+      {{ financials.net|floatformat:0 }} <small class="fs-6 text-muted">FCFA</small>
+    </div>
+    <div class="kpi-footer">
+      <span class="text-muted">Projection J{{ batch.target_duration_days }} :</span>
+      <strong class="ms-1 {% if financials.projected_net >= 0 %}text-success{% else %}text-muted{% endif %}">
+        {{ financials.projected_net|floatformat:0 }} FCFA
+      </strong>
+    </div>
+  </article>
+</section>
+
+<!-- Middle Section: Soins & Prophylaxie + Structure Financière -->
+<div class="row g-4 mb-4">
+  <!-- Left: Prophylaxis & Due Treatments -->
+  <div class="col-lg-7">
+    <div class="app-card h-100">
+      <div class="card-header-clean">
+        <h2 class="card-title-clean">
+          <i class="bi bi-shield-plus"></i>
+          <span>Programme prophylactique & Soins</span>
+        </h2>
+        <div class="d-flex align-items-center gap-2">
+          <a class="small text-muted fw-semibold me-1" href="{% url 'treatment-list' %}?batch={{ batch.pk }}">
+            Calendrier complet <i class="bi bi-arrow-right"></i>
+          </a>
+          <span class="app-badge {% if due_treatments %}badge-warning-soft{% else %}badge-success-soft{% endif %}">
+            {{ due_treatments|length }} à traiter
+          </span>
+        </div>
+      </div>
+
+      {% if due_treatments %}
+      <div class="treatment-card-list">
+        {% for treatment in due_treatments %}
+        <div class="treatment-item-card">
+          <div class="treatment-day-pill">
+            J{{ treatment.target_day }}
+          </div>
+          <div class="treatment-info">
+            <div class="treatment-name">{{ treatment.medicine_name }}</div>
+            <div class="treatment-meta">
+              <span><i class="bi bi-calendar-event me-1"></i> {{ treatment.date_planned|date:'d/m/Y' }}</span>
+              {% if treatment.date_planned < today %}
+                <span class="app-badge badge-danger-soft py-0 px-2">En retard</span>
+              {% elif treatment.date_planned == today %}
+                <span class="app-badge badge-warning-soft py-0 px-2">Aujourd'hui</span>
+              {% endif %}
+              <span>•</span>
+              <span class="text-secondary"><i class="bi bi-droplet me-1"></i> {{ treatment.get_administration_route_display|default:treatment.administration_route }}</span>
+              {% if treatment.dosage %}
+                <span>• {{ treatment.dosage }}</span>
+              {% endif %}
+            </div>
+          </div>
+          <form method="post" action="{% url 'treatment-complete' treatment.pk %}" class="m-0">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{{ request.get_full_path }}">
+            <button class="btn-complete-treatment" type="submit" title="Valider comme administré">
+              <i class="bi bi-check2"></i>
+              <span>Administré</span>
+            </button>
+          </form>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="text-center py-4 text-muted">
+        <i class="bi bi-check-circle-fill text-success fs-2 d-block mb-2"></i>
+        <div class="fw-bold">À jour !</div>
+        <p class="small mb-0">Aucun traitement prévu dans les 3 prochains jours.</p>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Right: Structure des Coûts & Finances -->
+  <div class="col-lg-5">
+    <div class="app-card h-100 d-flex flex-column justify-content-between">
+      <div>
+        <div class="card-header-clean">
+          <h2 class="card-title-clean">
+            <i class="bi bi-pie-chart-fill"></i>
+            <span>Structure des coûts du lot</span>
+          </h2>
+          <a class="small text-muted fw-semibold" href="{% url 'expense-list' %}?batch={{ batch.pk }}">
+            Détail dépenses <i class="bi bi-arrow-right"></i>
+          </a>
+        </div>
+
+        <div class="d-flex flex-column gap-3 mb-4">
+          <div class="p-3 rounded-3 bg-light border d-flex justify-content-between align-items-center">
+            <div>
+              <div class="text-muted small fw-semibold">Charges directes (consommables du lot)</div>
+              <div class="small text-muted">Poussins ({{ batch.chick_cost|floatformat:0 }} FCFA), santé & alimentation</div>
+            </div>
+            <div class="fs-6 fw-bold text-dark">{{ financials.direct_costs|floatformat:0 }} FCFA</div>
+          </div>
+
+          <div class="p-3 rounded-3 bg-light border d-flex justify-content-between align-items-center">
+            <div>
+              <div class="text-muted small fw-semibold">Amortissement matériel (quote-part du cycle)</div>
+              <div class="small text-muted">Usure bâtiment / matériel sur {{ batch.target_duration_days }} jours</div>
+            </div>
+            <div class="fs-6 fw-bold text-dark">{{ financials.amortization|floatformat:0 }} FCFA</div>
+          </div>
+
+          <div class="p-3 rounded-3 bg-white border border-success border-opacity-50 d-flex justify-content-between align-items-center">
+            <div>
+              <div class="text-success small fw-bold text-uppercase">Coût de revient engagé du lot</div>
+              <div class="small text-muted">Charges directes + Amortissement du cycle</div>
+            </div>
+            <div class="fs-5 fw-bold text-success">{{ financials.total_costs|floatformat:0 }} FCFA</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="p-3 rounded-3 bg-light border-0 small text-muted">
+        <i class="bi bi-info-circle text-primary me-1"></i>
+        <span><strong>Comptabilité avicole :</strong> Les investissements durables (bâtiments, tôles) sont amortis au prorata de la durée du cycle ({{ batch.target_duration_days }} jours) plutôt que payés par une seule bande. Total décaissé en caisse pour ce lot : <strong>{{ expenses_total|floatformat:0 }} FCFA</strong>.</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Charts Section: Line & Doughnut Charts -->
+<div class="row g-4 mb-4">
+  <!-- Mortality Line Chart -->
+  <div class="col-lg-7">
+    <div class="app-card">
+      <div class="card-header-clean">
+        <h2 class="card-title-clean">
+          <i class="bi bi-graph-down text-danger"></i>
+          <span>Suivi quotidien de la mortalité</span>
+        </h2>
+        <span class="small text-muted">Nombre de décès par date</span>
+      </div>
+      <div class="chart-card-container">
+        <canvas id="mortalityChart" aria-label="Courbe de mortalité quotidienne"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- Expense Breakdown Doughnut Chart -->
+  <div class="col-lg-5">
+    <div class="app-card">
+      <div class="card-header-clean">
+        <h2 class="card-title-clean">
+          <i class="bi bi-pie-chart text-warning"></i>
+          <span>Répartition des charges</span>
+        </h2>
+        <span class="small text-muted">{{ batch.name }}</span>
+      </div>
+      <div class="chart-card-container">
+        <canvas id="expenseChart" aria-label="Répartition des dépenses"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Bottom Section: Feed Stock Available & Recent Mortality History -->
+<div class="row g-4">
+  <!-- Feed Stock Summary -->
+  <div class="col-lg-6">
+    <div class="app-card h-100">
+      <div class="card-header-clean">
+        <h2 class="card-title-clean">
+          <i class="bi bi-box-seam"></i>
+          <span>Disponibilités des aliments</span>
+        </h2>
+        <div class="d-flex gap-2">
+          <a class="btn-app-secondary py-1 px-2 small" href="{% url 'feed-stock' %}">
+            <i class="bi bi-boxes"></i> Stocks
+          </a>
+          <a class="btn-app-primary py-1 px-2 small" href="{% url 'feed-purchase' %}">
+            <i class="bi bi-plus-lg"></i> Réceptionner
+          </a>
+        </div>
+      </div>
+
+      <div class="stock-grid">
+        {% for key, stock in feed_stock.items %}
+        <div class="stock-box">
+          <div class="stock-box-header">
+            <span class="stock-type-title">{{ stock.label }}</span>
+            <i class="bi bi-basket text-success fs-5"></i>
+          </div>
+          <div>
+            <div class="stock-amount-display">{{ stock.remaining_kg|floatformat:1 }} <small class="fs-6 text-muted">kg</small></div>
+            <div class="small text-muted">≈ <strong>{{ stock.remaining_bags|floatformat:1 }}</strong> sac(s)</div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Recent Mortality Events -->
+  <div class="col-lg-6">
+    <div class="app-card h-100">
+      <div class="card-header-clean">
+        <h2 class="card-title-clean">
+          <i class="bi bi-clock-history"></i>
+          <span>Derniers décès enregistrés</span>
+        </h2>
+        <a class="small text-muted fw-semibold" href="{% url 'daily-entry' %}">
+          + Saisie rapide
+        </a>
+      </div>
+
+      {% if recent_mortality %}
+      <div class="app-table-wrapper">
+        <table class="app-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Nombre</th>
+              <th>Cause présumée</th>
+              <th>Observations</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for event in recent_mortality %}
+            <tr>
+              <td>{{ event.date|date:'d/m/Y' }}</td>
+              <td><span class="badge-danger-soft app-badge">{{ event.count }} sujet(s)</span></td>
+              <td class="fw-semibold">{{ event.get_cause_suspected_display }}</td>
+              <td class="text-muted small">{{ event.notes|default:'—' }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="text-center py-4 text-muted">
+        <i class="bi bi-emoji-smile fs-2 text-success d-block mb-2"></i>
+        <span>Aucun décès récent enregistré.</span>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if batch %}
+{{ mortality_labels|json_script:'mortality-labels' }}
+{{ mortality_values|json_script:'mortality-values' }}
+{{ expense_labels|json_script:'expense-labels' }}
+{{ expense_values|json_script:'expense-values' }}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  const mortalityLabels = JSON.parse(document.getElementById('mortality-labels').textContent);
+  const mortalityValues = JSON.parse(document.getElementById('mortality-values').textContent);
+  const expenseLabels = JSON.parse(document.getElementById('expense-labels').textContent);
+  const expenseValues = JSON.parse(document.getElementById('expense-values').textContent);
+
+  // 1. Mortality Chart
+  const ctxMortality = document.getElementById('mortalityChart');
+  if (ctxMortality) {
+    new Chart(ctxMortality, {
+      type: 'line',
+      data: {
+        labels: mortalityLabels.length ? mortalityLabels : ['Début du lot'],
+        datasets: [{
+          data: mortalityValues.length ? mortalityValues : [0],
+          label: 'Décès',
+          borderColor: '#f43f5e',
+          backgroundColor: 'rgba(244, 63, 94, 0.12)',
+          fill: true,
+          tension: 0.35,
+          borderWidth: 2.5,
+          pointBackgroundColor: '#f43f5e',
+          pointBorderColor: '#ffffff',
+          pointBorderWidth: 2,
+          pointRadius: 4,
+          pointHoverRadius: 6
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            padding: 10,
+            cornerRadius: 8,
+            backgroundColor: '#0f172a'
+          }
+        },
+        scales: {
+          y: {
+            beginAtZero: true,
+            ticks: { precision: 0, font: { family: 'Plus Jakarta Sans' } },
+            grid: { color: 'rgba(226, 232, 240, 0.6)' }
+          },
+          x: {
+            ticks: { font: { family: 'Plus Jakarta Sans' } },
+            grid: { display: false }
+          }
+        }
+      }
+    });
+  }
+
+  // 2. Expense Breakdown Chart
+  const ctxExpense = document.getElementById('expenseChart');
+  if (ctxExpense) {
+    const palette = ['#059669', '#10b981', '#f59e0b', '#f43f5e', '#6366f1', '#0ea5e9', '#8b5cf6', '#64748b'];
+    new Chart(ctxExpense, {
+      type: 'doughnut',
+      data: {
+        labels: expenseLabels.length ? expenseLabels : ['Aucune dépense'],
+        datasets: [{
+          data: expenseValues.length ? expenseValues : [1],
+          backgroundColor: expenseLabels.length ? palette.slice(0, expenseLabels.length) : ['#e2e8f0'],
+          borderWidth: 3,
+          borderColor: '#ffffff',
+          hoverOffset: 4
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        cutout: '68%',
+        plugins: {
+          legend: {
+            position: 'bottom',
+            labels: {
+              boxWidth: 10,
+              boxHeight: 10,
+              padding: 12,
+              font: { family: 'Plus Jakarta Sans', size: 11, weight: 600 }
+            }
+          },
+          tooltip: {
+            padding: 10,
+            cornerRadius: 8,
+            backgroundColor: '#0f172a'
+          }
+        }
+      }
+    });
+  }
+});
+</script>
+{% endif %}
+{% endblock %}

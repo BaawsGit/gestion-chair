@@ -1,0 +1,104 @@
+{% extends 'base.html' %}
+{% block title %}Historique des Lots · Gestion Chair{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="page-header-info">
+    <div class="d-flex align-items-center gap-2">
+      <span class="page-tag"><i class="bi bi-collection text-success"></i> BANDES DE PRODUCTION</span>
+    </div>
+    <h1 class="page-title">Historique des Lots</h1>
+    <p class="page-subtitle">
+      Suivez les performances de chaque cycle : taux de survie, mortalité, effectifs et clôtures.
+    </p>
+  </div>
+  <div class="page-header-actions">
+    <a class="btn-app-primary" href="{% url 'batch-create' %}">
+      <i class="bi bi-plus-circle-fill"></i>
+      <span>Nouveau lot</span>
+    </a>
+  </div>
+</div>
+
+<div class="app-card">
+  {% if batches %}
+  <div class="app-table-wrapper">
+    <table class="app-table">
+      <thead>
+        <tr>
+          <th>Nom du Lot</th>
+          <th>Date de démarrage</th>
+          <th>Âge du cycle</th>
+          <th>Cheptel restant</th>
+          <th>Mortalité</th>
+          <th>Statut</th>
+          <th class="text-end">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for batch in batches %}
+        <tr>
+          <td>
+            <div class="fw-bold fs-6 text-dark">{{ batch.name }}</div>
+            <div class="small text-muted">
+              <strong>{{ batch.initial_quantity }}</strong> poussins au départ
+              {% if batch.bonus_quantity > 0 %}
+                <span class="text-success fw-semibold">({{ batch.ordered_quantity }} payés + {{ batch.bonus_quantity }} bonus)</span>
+              {% endif %}
+            </div>
+          </td>
+          <td class="text-nowrap">{{ batch.start_date|date:'d/m/Y' }}</td>
+          <td>
+            <span class="fw-semibold text-dark">J{{ batch.current_age_days }}</span>
+            <span class="text-muted small"> / {{ batch.target_duration_days }} jours</span>
+          </td>
+          <td>
+            <span class="fw-bold text-success">{{ batch.current_stock }}</span>
+            <span class="text-muted small"> / {{ batch.initial_quantity }}</span>
+          </td>
+          <td>
+            <span class="app-badge {% if batch.mortality_rate < 3 %}badge-success-soft{% elif batch.mortality_rate < 5 %}badge-warning-soft{% else %}badge-danger-soft{% endif %}">
+              {{ batch.mortality_rate }}% ({{ batch.deaths_count }} morts)
+            </span>
+          </td>
+          <td>
+            {% if batch.status == 'active' %}
+              <span class="app-badge badge-success-soft">
+                <span class="pulse-dot"></span> En cours
+              </span>
+            {% else %}
+              <span class="app-badge badge-neutral-soft">
+                <i class="bi bi-archive me-1"></i> {{ batch.get_status_display }}
+              </span>
+            {% endif %}
+          </td>
+          <td class="text-end">
+            <div class="d-inline-flex gap-2">
+              <a class="btn-app-secondary py-1 px-2 small d-inline-flex align-items-center" href="{% url 'batch-edit' batch.pk %}" title="Modifier les paramètres du lot">
+                <i class="bi bi-pencil"></i>
+                <span class="d-none d-md-inline ms-1">Modifier</span>
+              </a>
+              <a class="btn-app-secondary py-1 px-3 small d-inline-flex" href="{% url 'batch-report' batch.pk %}">
+                <i class="bi bi-file-earmark-text"></i>
+                <span>Voir le bilan</span>
+              </a>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="text-center py-5 text-muted">
+    <i class="bi bi-layers fs-1 text-muted d-block mb-3"></i>
+    <div class="fw-bold fs-5">Aucun lot enregistré</div>
+    <p class="small mb-4">Créez votre première bande de poulets de chair pour démarrer.</p>
+    <a class="btn-app-primary d-inline-flex" href="{% url 'batch-create' %}">
+      <i class="bi bi-plus-lg"></i>
+      <span>Créer un lot</span>
+    </a>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

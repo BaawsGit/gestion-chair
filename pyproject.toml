@@ -1,0 +1,10 @@
+[project]
+name = "gestion-chair"
+version = "0.1.0"
+description = "Gestion locale d'une ferme avicole de poulets de chair"
+requires-python = ">=3.11"
+dependencies = [
+    "Django>=5.2,<5.3",
+    "psycopg[binary]>=3.2,<4.0",
+    "python-dotenv>=1.0,<2.0",
+]

@@ -1,0 +1,396 @@
+{% extends 'base.html' %}
+{% block title %}Programme de Médicaments (J1 à J45) · Gestion Chair{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="page-header-info">
+    <div class="d-flex align-items-center gap-2">
+      <span class="page-tag"><i class="bi bi-calendar3-range text-success"></i> PROGRAMME MÉDICAL JOURNALIER</span>
+    </div>
+    <h1 class="page-title">Programme de Médicaments (J1 à J45)</h1>
+    <p class="page-subtitle">
+      Planifiez jour par jour les traitements (Tétracolivit, vaccins, anticoccidiens, vitamines) du 1er au 45ème jour de l'élevage.
+    </p>
+  </div>
+  <div class="page-header-actions">
+    <a class="btn-app-secondary" href="{% url 'treatment-list' %}">
+      <i class="bi bi-calendar-event"></i>
+      <span>Calendrier du lot</span>
+    </a>
+    <a class="btn-app-primary" href="{% url 'prophylaxis-program-create' %}">
+      <i class="bi bi-plus-circle-fill"></i>
+      <span>+ Planifier un médicament (J1 à J45)</span>
+    </a>
+  </div>
+</div>
+
+<!-- Progress / Summary Banner -->
+<div class="row g-3 mb-4">
+  <div class="col-md-6 col-lg-4">
+    <div class="kpi-card kpi-card-emerald">
+      <div class="kpi-top">
+        <span class="kpi-label">Jours avec Traitement</span>
+        <div class="kpi-icon"><i class="bi bi-capsule"></i></div>
+      </div>
+      <div class="kpi-value text-success">{{ treated_days_count }} <small class="fs-6 text-muted">/ 45 jours</small></div>
+      <div class="kpi-footer">
+        <span class="app-badge badge-success-soft">
+          <i class="bi bi-check2"></i> Médicaments ou vaccins programmés
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-6 col-lg-8">
+    <div class="app-card h-100 d-flex flex-column justify-content-between">
+      <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-2">
+        <div>
+          <h3 class="fs-6 fw-bold mb-1">Cycle complet de 45 jours</h3>
+          <p class="small text-muted mb-0">
+            Les jours sans médicament sont automatiquement considérés en <strong>Eau claire / Repos</strong>.
+          </p>
+        </div>
+        {% if active_batch %}
+        <form method="post" action="{% url 'treatment-sync-batch' active_batch.pk %}" class="m-0">
+          {% csrf_token %}
+          <button type="submit" class="btn-app-secondary btn-sm" title="Appliquer l'ensemble des 45 jours sur le lot en cours">
+            <i class="bi bi-arrow-repeat text-success me-1"></i>
+            <span>Synchroniser avec le lot « {{ active_batch.name }} »</span>
+          </button>
+        </form>
+        {% endif %}
+      </div>
+
+      <!-- Quick Navigation between Phases -->
+      <div class="d-flex gap-2 flex-wrap pt-2 border-top">
+        <a href="#phase-1" class="btn btn-app-secondary py-1 px-3 small">
+          <i class="bi bi-egg-fried me-1 text-success"></i> Phase 1 : Démarrage (J1-J14)
+        </a>
+        <a href="#phase-2" class="btn btn-app-secondary py-1 px-3 small">
+          <i class="bi bi-lightning-charge me-1 text-warning"></i> Phase 2 : Croissance (J15-J28)
+        </a>
+        <a href="#phase-3" class="btn btn-app-secondary py-1 px-3 small">
+          <i class="bi bi-award me-1 text-primary"></i> Phase 3 : Finition (J29-J45)
+        </a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 45-DAY TIMETABLE -->
+
+<!-- Phase 1: J1 to J14 -->
+<div class="app-card mb-4" id="phase-1">
+  <div class="card-header-clean">
+    <h2 class="card-title-clean">
+      <i class="bi bi-egg-fried text-success"></i>
+      <span>Phase 1 · Démarrage (Jour 1 au Jour 14)</span>
+    </h2>
+    <span class="app-badge badge-success-soft">14 premiers jours critiques</span>
+  </div>
+
+  <div class="app-table-wrapper">
+    <table class="app-table">
+      <thead>
+        <tr>
+          <th style="width: 80px;">Jour</th>
+          <th>Traitement / Médicament</th>
+          <th>Voie</th>
+          <th>Dosage</th>
+          <th>Consignes & Remarques</th>
+          <th class="text-end">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for d in calendar_days %}
+        {% if d.phase == 1 %}
+        <tr {% if d.has_med %}class="table-light"{% endif %}>
+          <td>
+            <div class="treatment-day-pill {% if not d.has_med %}bg-light text-muted{% endif %}" style="width: 44px; height: 38px; font-size: 0.85rem;">
+              J{{ d.day }}
+            </div>
+          </td>
+          <td>
+            {% if d.has_med %}
+              {% for prog in d.programs %}
+                <div class="fw-bold text-dark fs-6">
+                  <i class="bi bi-capsule text-success me-1"></i> {{ prog.medicine_name }}
+                </div>
+              {% endfor %}
+            {% else %}
+              <span class="text-muted small">
+                <i class="bi bi-droplet me-1 text-info"></i> Eau claire (aucun traitement)
+              </span>
+            {% endif %}
+          </td>
+          <td>
+            {% if d.has_med %}
+              {% for prog in d.programs %}
+                <span class="app-badge badge-neutral-soft">
+                  {{ prog.administration_route }}
+                </span>
+              {% endfor %}
+            {% else %}
+              <span class="text-muted small">—</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if d.has_med %}
+              {% for prog in d.programs %}
+                <span class="small text-muted">{{ prog.dosage|default:'Selon notice' }}</span>
+              {% endfor %}
+            {% else %}
+              <span class="text-muted small">—</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if d.has_med %}
+              {% for prog in d.programs %}
+                <span class="small text-muted">{{ prog.notes|default:'—' }}</span>
+              {% endfor %}
+            {% else %}
+              <span class="text-muted small">—</span>
+            {% endif %}
+          </td>
+          <td class="text-end text-nowrap">
+            {% if d.has_med %}
+              {% for prog in d.programs %}
+                <a class="btn-app-secondary py-1 px-2 small me-1 d-inline-flex" href="{% url 'prophylaxis-program-create' %}?day={{ d.day }}" title="Modifier le médicament du J{{ d.day }}">
+                  <i class="bi bi-pencil-fill me-1"></i> Modifier
+                </a>
+                {% if d.day < 45 %}
+                <a class="btn-app-secondary py-1 px-2 small me-1 d-inline-flex" href="{% url 'prophylaxis-program-duplicate' d.day %}" title="Dupliquer à l'identique sur J{{ d.day|add:1 }} (pareil)">
+                  <i class="bi bi-arrow-down-right me-1 text-primary"></i> Dupliquer sur J{{ d.day|add:1 }}
+                </a>
+                {% endif %}
+                <form method="post" action="{% url 'prophylaxis-program-clear-day' d.day %}" class="d-inline m-0" onsubmit="return confirm('Effacer le médicament du jour J{{ d.day }} et repasser en eau claire ?');">
+                  {% csrf_token %}
+                  <button type="submit" class="btn-app-danger py-1 px-2 small" title="Effacer (Eau claire)">
+                    <i class="bi bi-trash3"></i>
+                  </button>
+                </form>
+              {% endfor %}
+            {% else %}
+              <a class="btn-app-primary py-1 px-2 small d-inline-flex" href="{% url 'prophylaxis-program-create' %}?day={{ d.day }}">
+                <i class="bi bi-plus-lg me-1"></i> Définir J{{ d.day }}
+              </a>
+            {% endif %}
+          </td>
+        </tr>
+        {% endif %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Phase 2: J15 to J28 -->
+<div class="app-card mb-4" id="phase-2">
+  <div class="card-header-clean">
+    <h2 class="card-title-clean">
+      <i class="bi bi-lightning-charge text-warning"></i>
+      <span>Phase 2 · Croissance (Jour 15 au Jour 28)</span>
+    </h2>
+    <span class="app-badge badge-warning-soft">Développement musculaire & Rappels</span>
+  </div>
+
+  <div class="app-table-wrapper">
+    <table class="app-table">
+      <thead>
+        <tr>
+          <th style="width: 80px;">Jour</th>
+          <th>Traitement / Médicament</th>
+          <th>Voie</th>
+          <th>Dosage</th>
+          <th>Consignes & Remarques</th>
+          <th class="text-end">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for d in calendar_days %}
+        {% if d.phase == 2 %}
+        <tr {% if d.has_med %}class="table-light"{% endif %}>
+          <td>
+            <div class="treatment-day-pill {% if not d.has_med %}bg-light text-muted{% endif %}" style="width: 44px; height: 38px; font-size: 0.85rem;">
+              J{{ d.day }}
+            </div>
+          </td>
+          <td>
+            {% if d.has_med %}
+              {% for prog in d.programs %}
+                <div class="fw-bold text-dark fs-6">
+                  <i class="bi bi-capsule text-success me-1"></i> {{ prog.medicine_name }}
+                </div>
+              {% endfor %}
+            {% else %}
+              <span class="text-muted small">
+                <i class="bi bi-droplet me-1 text-info"></i> Eau claire (aucun traitement)
+              </span>
+            {% endif %}
+          </td>
+          <td>
+            {% if d.has_med %}
+              {% for prog in d.programs %}
+                <span class="app-badge badge-neutral-soft">
+                  {{ prog.administration_route }}
+                </span>
+              {% endfor %}
+            {% else %}
+              <span class="text-muted small">—</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if d.has_med %}
+              {% for prog in d.programs %}
+                <span class="small text-muted">{{ prog.dosage|default:'Selon notice' }}</span>
+              {% endfor %}
+            {% else %}
+              <span class="text-muted small">—</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if d.has_med %}
+              {% for prog in d.programs %}
+                <span class="small text-muted">{{ prog.notes|default:'—' }}</span>
+              {% endfor %}
+            {% else %}
+              <span class="text-muted small">—</span>
+            {% endif %}
+          </td>
+          <td class="text-end text-nowrap">
+            {% if d.has_med %}
+              {% for prog in d.programs %}
+                <a class="btn-app-secondary py-1 px-2 small me-1 d-inline-flex" href="{% url 'prophylaxis-program-create' %}?day={{ d.day }}" title="Modifier le médicament du J{{ d.day }}">
+                  <i class="bi bi-pencil-fill me-1"></i> Modifier
+                </a>
+                {% if d.day < 45 %}
+                <a class="btn-app-secondary py-1 px-2 small me-1 d-inline-flex" href="{% url 'prophylaxis-program-duplicate' d.day %}" title="Dupliquer à l'identique sur J{{ d.day|add:1 }} (pareil)">
+                  <i class="bi bi-arrow-down-right me-1 text-primary"></i> Dupliquer sur J{{ d.day|add:1 }}
+                </a>
+                {% endif %}
+                <form method="post" action="{% url 'prophylaxis-program-clear-day' d.day %}" class="d-inline m-0" onsubmit="return confirm('Effacer le médicament du jour J{{ d.day }} et repasser en eau claire ?');">
+                  {% csrf_token %}
+                  <button type="submit" class="btn-app-danger py-1 px-2 small" title="Effacer (Eau claire)">
+                    <i class="bi bi-trash3"></i>
+                  </button>
+                </form>
+              {% endfor %}
+            {% else %}
+              <a class="btn-app-primary py-1 px-2 small d-inline-flex" href="{% url 'prophylaxis-program-create' %}?day={{ d.day }}">
+                <i class="bi bi-plus-lg me-1"></i> Définir J{{ d.day }}
+              </a>
+            {% endif %}
+          </td>
+        </tr>
+        {% endif %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Phase 3: J29 to J45 -->
+<div class="app-card mb-4" id="phase-3">
+  <div class="card-header-clean">
+    <h2 class="card-title-clean">
+      <i class="bi bi-award text-primary"></i>
+      <span>Phase 3 · Finition & Vente (Jour 29 au Jour 45)</span>
+    </h2>
+    <span class="app-badge badge-info-soft">Prise de poids finale & Purge</span>
+  </div>
+
+  <div class="app-table-wrapper">
+    <table class="app-table">
+      <thead>
+        <tr>
+          <th style="width: 80px;">Jour</th>
+          <th>Traitement / Médicament</th>
+          <th>Voie</th>
+          <th>Dosage</th>
+          <th>Consignes & Remarques</th>
+          <th class="text-end">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for d in calendar_days %}
+        {% if d.phase == 3 %}
+        <tr {% if d.has_med %}class="table-light"{% endif %}>
+          <td>
+            <div class="treatment-day-pill {% if not d.has_med %}bg-light text-muted{% endif %}" style="width: 44px; height: 38px; font-size: 0.85rem;">
+              J{{ d.day }}
+            </div>
+          </td>
+          <td>
+            {% if d.has_med %}
+              {% for prog in d.programs %}
+                <div class="fw-bold text-dark fs-6">
+                  <i class="bi bi-capsule text-success me-1"></i> {{ prog.medicine_name }}
+                </div>
+              {% endfor %}
+            {% else %}
+              <span class="text-muted small">
+                <i class="bi bi-droplet me-1 text-info"></i> Eau claire (aucun traitement)
+              </span>
+            {% endif %}
+          </td>
+          <td>
+            {% if d.has_med %}
+              {% for prog in d.programs %}
+                <span class="app-badge badge-neutral-soft">
+                  {{ prog.administration_route }}
+                </span>
+              {% endfor %}
+            {% else %}
+              <span class="text-muted small">—</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if d.has_med %}
+              {% for prog in d.programs %}
+                <span class="small text-muted">{{ prog.dosage|default:'Selon notice' }}</span>
+              {% endfor %}
+            {% else %}
+              <span class="text-muted small">—</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if d.has_med %}
+              {% for prog in d.programs %}
+                <span class="small text-muted">{{ prog.notes|default:'—' }}</span>
+              {% endfor %}
+            {% else %}
+              <span class="text-muted small">—</span>
+            {% endif %}
+          </td>
+          <td class="text-end text-nowrap">
+            {% if d.has_med %}
+              {% for prog in d.programs %}
+                <a class="btn-app-secondary py-1 px-2 small me-1 d-inline-flex" href="{% url 'prophylaxis-program-create' %}?day={{ d.day }}" title="Modifier le médicament du J{{ d.day }}">
+                  <i class="bi bi-pencil-fill me-1"></i> Modifier
+                </a>
+                {% if d.day < 45 %}
+                <a class="btn-app-secondary py-1 px-2 small me-1 d-inline-flex" href="{% url 'prophylaxis-program-duplicate' d.day %}" title="Dupliquer à l'identique sur J{{ d.day|add:1 }} (pareil)">
+                  <i class="bi bi-arrow-down-right me-1 text-primary"></i> Dupliquer sur J{{ d.day|add:1 }}
+                </a>
+                {% endif %}
+                <form method="post" action="{% url 'prophylaxis-program-clear-day' d.day %}" class="d-inline m-0" onsubmit="return confirm('Effacer le médicament du jour J{{ d.day }} et repasser en eau claire ?');">
+                  {% csrf_token %}
+                  <button type="submit" class="btn-app-danger py-1 px-2 small" title="Effacer (Eau claire)">
+                    <i class="bi bi-trash3"></i>
+                  </button>
+                </form>
+              {% endfor %}
+            {% else %}
+              <a class="btn-app-primary py-1 px-2 small d-inline-flex" href="{% url 'prophylaxis-program-create' %}?day={{ d.day }}">
+                <i class="bi bi-plus-lg me-1"></i> Définir J{{ d.day }}
+              </a>
+            {% endif %}
+          </td>
+        </tr>
+        {% endif %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

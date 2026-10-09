@@ -1,0 +1,111 @@
+{% extends 'base.html' %}
+{% block title %}Connexion · Gestion Chair{% endblock %}
+
+{% block content %}
+<div class="auth-page-container">
+  <div class="auth-split-wrapper">
+    <!-- Left Promotional / Brand Showcase Panel -->
+    <div class="auth-promo-panel">
+      <div>
+        <div class="d-inline-flex align-items-center gap-2 mb-4 px-3 py-1 bg-white bg-opacity-10 border border-white border-opacity-20 rounded-pill">
+          <span class="pulse-dot"></span>
+          <span class="small fw-semibold text-white">Version 2.0 · Production Locale</span>
+        </div>
+        <h1 class="display-6 fw-bold text-white mb-3">
+          Pilotez votre élevage de poulets de chair en toute clarté.
+        </h1>
+        <p class="text-white text-opacity-80 fs-6 mb-0">
+          Une plateforme complète pour maîtriser les coûts de revient, sécuriser la prophylaxie et maximiser la marge nette par sujet.
+        </p>
+
+        <div class="auth-features-list">
+          <div class="auth-feature-item">
+            <div class="auth-feature-icon">
+              <i class="bi bi-clock-history"></i>
+            </div>
+            <div>
+              <div class="fw-bold text-white">Cycles de 45 jours maîtrisés</div>
+              <div class="small text-white text-opacity-75">Suivi en direct de l'âge du lot, des effectifs vivants et du taux de mortalité.</div>
+            </div>
+          </div>
+
+          <div class="auth-feature-item">
+            <div class="auth-feature-icon">
+              <i class="bi bi-shield-check"></i>
+            </div>
+            <div>
+              <div class="fw-bold text-white">Programme prophylactique guidé</div>
+              <div class="small text-white text-opacity-75">Rappels automatiques de vaccination (Gumboro, Newcastle) et vitamines.</div>
+            </div>
+          </div>
+
+          <div class="auth-feature-item">
+            <div class="auth-feature-icon">
+              <i class="bi bi-graph-up-arrow"></i>
+            </div>
+            <div>
+              <div class="fw-bold text-white">Rentabilité & Coût de revient</div>
+              <div class="small text-white text-opacity-75">Amortissements des infrastructures, conversion aliment et marges nettes réelles.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="pt-4 border-top border-white border-opacity-20 text-white text-opacity-75 small d-flex justify-content-between align-items-center">
+        <span>&copy; 2026 Gestion Chair</span>
+        <span>Système Avicole Sécurisé</span>
+      </div>
+    </div>
+
+    <!-- Right Login Form Panel -->
+    <div class="auth-form-panel">
+      <div class="mb-4">
+        <span class="page-tag mb-1">
+          <i class="bi bi-lock-fill"></i> Espace d'administration
+        </span>
+        <h2 class="fw-bold fs-3 text-dark mb-2">Bienvenue sur votre ferme</h2>
+        <p class="text-muted small">Connectez-vous pour accéder au tableau de bord d'exploitation.</p>
+      </div>
+
+      {% if form.errors %}
+      <div class="app-alert app-alert-danger mb-4">
+        <i class="bi bi-exclamation-octagon-fill fs-5 text-danger"></i>
+        <div>Identifiant ou mot de passe incorrect. Veuillez réessayer.</div>
+      </div>
+      {% endif %}
+
+      <form method="post" action="{% url 'login' %}">
+        {% csrf_token %}
+        <div class="mb-3">
+          <label class="form-label" for="id_username">
+            <i class="bi bi-person me-1 text-muted"></i> Nom d'utilisateur
+          </label>
+          <input type="text" name="username" autofocus autocapitalize="none" autocomplete="username" maxlength="150" required id="id_username" class="form-control" placeholder="ex. admin">
+        </div>
+
+        <div class="mb-4">
+          <label class="form-label" for="id_password">
+            <i class="bi bi-key me-1 text-muted"></i> Mot de passe
+          </label>
+          <input type="password" name="password" autocomplete="current-password" required id="id_password" class="form-control" placeholder="••••••••">
+        </div>
+
+        <div class="p-3 mb-4 rounded-3 bg-light border d-flex align-items-center justify-content-between small text-muted">
+          <div>
+            <i class="bi bi-info-circle text-primary me-1"></i>
+            <span>Accès par défaut :</span>
+          </div>
+          <code class="fw-bold text-dark bg-white px-2 py-1 rounded border">admin / admin1234</code>
+        </div>
+
+        <input type="hidden" name="next" value="{{ next|default:'/' }}">
+
+        <button class="btn-app-primary w-100 py-3 justify-content-center text-center" type="submit">
+          <span>Se connecter au tableau de bord</span>
+          <i class="bi bi-arrow-right"></i>
+        </button>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

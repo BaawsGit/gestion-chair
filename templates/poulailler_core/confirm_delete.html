@@ -1,0 +1,45 @@
+{% extends 'base.html' %}
+{% block title %}{{ title }} · Gestion Chair{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="page-header-info">
+    <div class="d-flex align-items-center gap-2">
+      <span class="page-tag text-danger"><i class="bi bi-trash3 text-danger"></i> CONFIRMATION DE SUPPRESSION</span>
+    </div>
+    <h1 class="page-title">{{ title }}</h1>
+  </div>
+  <div class="page-header-actions">
+    <a class="btn-app-secondary" href="{{ cancel_url|default:'/' }}">
+      <i class="bi bi-arrow-left"></i>
+      <span>Retour</span>
+    </a>
+  </div>
+</div>
+
+<div class="app-card border-danger border-opacity-50" style="max-width: 600px; margin: 0 auto;">
+  <div class="d-flex align-items-center gap-2 mb-3 text-danger">
+    <i class="bi bi-exclamation-triangle-fill fs-3"></i>
+    <h3 class="fs-5 fw-bold mb-0">Êtes-vous sûr de vouloir supprimer cet élément ?</h3>
+  </div>
+
+  <p class="text-muted">
+    Vous êtes sur le point de supprimer définitivement :
+  </p>
+
+  <div class="p-3 bg-light rounded-3 border mb-4 fw-bold text-dark">
+    {{ object_name }}
+  </div>
+
+  <form method="post" class="d-flex align-items-center gap-3">
+    {% csrf_token %}
+    <button type="submit" class="btn-app-danger">
+      <i class="bi bi-trash3-fill"></i>
+      <span>Oui, supprimer définitivement</span>
+    </button>
+    <a class="btn-app-secondary" href="{{ cancel_url|default:'/' }}">
+      <span>Annuler</span>
+    </a>
+  </form>
+</div>
+{% endblock %}

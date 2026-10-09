@@ -1,0 +1,224 @@
+{% extends 'base.html' %}
+{% block title %}Calendrier de prophylaxie · {{ batch.name|default:'Ferme' }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="page-header-info">
+    <div class="d-flex align-items-center gap-2">
+      <span class="page-tag"><i class="bi bi-shield-check text-success"></i> PROGRAMME SANITAIRE</span>
+      {% if batch %}
+        <span class="app-badge badge-success-soft fw-bold">{{ batch.name }}</span>
+      {% endif %}
+    </div>
+    <h1 class="page-title">Calendrier des Soins & Vaccins</h1>
+    {% if batch %}
+      <p class="page-subtitle">
+        <span>Arrivée le {{ batch.start_date|date:'d/m/Y' }}</span>
+        <span>•</span>
+        <span>Âge : Jour <strong>{{ batch.current_age_days }}</strong> / {{ batch.target_duration_days }} jours</span>
+      </p>
+    {% else %}
+      <p class="page-subtitle">Gestion du calendrier sanitaire et des traitements.</p>
+    {% endif %}
+  </div>
+
+  <div class="page-header-actions">
+    {% if all_batches|length > 1 %}
+    <form method="get" class="d-inline-flex align-items-center me-2">
+      <div class="input-group input-group-sm">
+        <span class="input-group-text bg-white border-end-0 text-muted"><i class="bi bi-layers"></i></span>
+        <select name="batch" class="form-select border-start-0 ps-1" onchange="this.form.submit()">
+          {% for b in all_batches %}
+            <option value="{{ b.pk }}" {% if b.pk == batch.pk %}selected{% endif %}>
+              {{ b.name }} ({{ b.get_status_display }})
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+    </form>
+    {% endif %}
+
+    <a class="btn-app-secondary" href="{% url 'prophylaxis-program-list' %}">
+      <i class="bi bi-gear-wide-connected"></i>
+      <span>Configurer le programme modèle (J1-J45)</span>
+    </a>
+
+    {% if batch %}
+    <a class="btn-app-primary" href="{% url 'treatment-create' %}?batch={{ batch.pk }}">
+      <i class="bi bi-plus-circle-fill"></i>
+      <span>+ Ajouter un soin au lot</span>
+    </a>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Navigation Tabs between Batch Treatments and Reference Program -->
+<div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-4">
+  <div class="d-flex align-items-center gap-2">
+    <a href="{% url 'treatment-list' %}{% if batch %}?batch={{ batch.pk }}{% endif %}" class="btn btn-app-primary btn-sm">
+      <i class="bi bi-calendar-event me-1"></i> Soins appliqués au lot
+    </a>
+    <a href="{% url 'prophylaxis-program-list' %}" class="btn btn-app-secondary btn-sm">
+      <i class="bi bi-gear-wide-connected me-1"></i> Programme modèle de référence ({{ program_count }})
+    </a>
+  </div>
+
+  {% if batch and program_count > 0 %}
+  <form method="post" action="{% url 'treatment-sync-batch' batch.pk %}" class="m-0">
+    {% csrf_token %}
+    <button type="submit" class="btn-app-secondary btn-sm" title="Synchronise ce lot avec les protocoles du programme modèle">
+      <i class="bi bi-arrow-repeat me-1 text-success"></i>
+      <span>Synchroniser avec le programme modèle</span>
+    </button>
+  </form>
+  {% endif %}
+</div>
+
+{% if not batch %}
+  <div class="app-card text-center py-5">
+    <div class="brand-icon mx-auto mb-3" style="width: 56px; height: 56px; font-size: 1.75rem;">
+      <i class="bi bi-layers"></i>
+    </div>
+    <h3 class="fw-bold mb-2">Aucun lot de poulets actif</h3>
+    <p class="text-muted small mb-4" style="max-width: 480px; margin: 0 auto;">
+      Pour suivre un calendrier de soins au jour le jour, démarrez un nouveau lot. Vous pouvez également dès maintenant préparer votre programme de médicaments modèle (J1 à J45).
+    </p>
+    <div class="d-flex justify-content-center gap-3">
+      <a class="btn-app-primary" href="{% url 'batch-create' %}">
+        <i class="bi bi-plus-lg"></i>
+        <span>Créer un lot</span>
+      </a>
+      <a class="btn-app-secondary" href="{% url 'prophylaxis-program-list' %}">
+        <i class="bi bi-shield-lock"></i>
+        <span>Configurer le programme J1-J45</span>
+      </a>
+    </div>
+  </div>
+{% else %}
+
+<!-- Status Filter Tabs for the Batch -->
+<div class="d-flex align-items-center gap-2 mb-4">
+  <a href="?batch={{ batch.pk }}&status=all" class="btn {% if status_filter == 'all' %}btn-app-primary{% else %}btn-app-secondary{% endif %} btn-sm">
+    <i class="bi bi-list-task"></i>
+    <span>Tous les soins ({{ treatments|length }})</span>
+  </a>
+  <a href="?batch={{ batch.pk }}&status=pending" class="btn {% if status_filter == 'pending' %}btn-app-primary{% else %}btn-app-secondary{% endif %} btn-sm">
+    <i class="bi bi-clock-history"></i>
+    <span>À administrer</span>
+  </a>
+  <a href="?batch={{ batch.pk }}&status=completed" class="btn {% if status_filter == 'completed' %}btn-app-primary{% else %}btn-app-secondary{% endif %} btn-sm">
+    <i class="bi bi-check2-all"></i>
+    <span>Effectués</span>
+  </a>
+</div>
+
+<!-- Treatments Table -->
+<div class="app-card">
+  {% if treatments %}
+  <div class="app-table-wrapper">
+    <table class="app-table">
+      <thead>
+        <tr>
+          <th>Échéance</th>
+          <th>Date planifiée</th>
+          <th>Soin & Médicament</th>
+          <th>Voie d'administration</th>
+          <th>Dosage</th>
+          <th>Statut</th>
+          <th class="text-center">Validation</th>
+          <th class="text-end">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for treatment in treatments %}
+        <tr {% if not treatment.is_completed and treatment.date_planned < today %}class="table-danger bg-opacity-25"{% endif %}>
+          <td>
+            <div class="treatment-day-pill" style="width: 36px; height: 36px; font-size: 0.8rem;">
+              J{{ treatment.target_day }}
+            </div>
+          </td>
+          <td class="text-nowrap">
+            <div class="fw-semibold">{{ treatment.date_planned|date:'d/m/Y' }}</div>
+            {% if not treatment.is_completed and treatment.date_planned < today %}
+              <span class="app-badge badge-danger-soft py-0 px-2 mt-1">En retard</span>
+            {% elif not treatment.is_completed and treatment.date_planned == today %}
+              <span class="app-badge badge-warning-soft py-0 px-2 mt-1">Aujourd'hui</span>
+            {% endif %}
+          </td>
+          <td>
+            <div class="fw-bold text-dark">{{ treatment.medicine_name }}</div>
+            {% if treatment.notes %}
+              <div class="small text-muted">{{ treatment.notes }}</div>
+            {% endif %}
+          </td>
+          <td>
+            <span class="app-badge badge-neutral-soft">
+              <i class="bi bi-droplet me-1"></i>
+              {{ treatment.get_administration_route_display|default:treatment.administration_route|default:'—' }}
+            </span>
+          </td>
+          <td class="small text-muted">{{ treatment.dosage|default:'Selon notice' }}</td>
+          <td>
+            {% if treatment.is_completed %}
+              <span class="app-badge badge-success-soft">
+                <i class="bi bi-check-circle-fill"></i>
+                Fait le {{ treatment.date_administered|date:'d/m/Y' }}
+              </span>
+            {% else %}
+              <span class="app-badge badge-warning-soft">
+                <i class="bi bi-hourglass-split"></i>
+                En attente
+              </span>
+            {% endif %}
+          </td>
+          <td class="text-center">
+            {% if not treatment.is_completed %}
+            <form method="post" action="{% url 'treatment-complete' treatment.pk %}" class="d-inline m-0">
+              {% csrf_token %}
+              <input type="hidden" name="next" value="{{ request.get_full_path }}">
+              <button class="btn-complete-treatment" type="submit">
+                <i class="bi bi-check2"></i>
+                <span>Valider</span>
+              </button>
+            </form>
+            {% else %}
+              <span class="text-success small fw-bold">
+                <i class="bi bi-check-all fs-5"></i>
+              </span>
+            {% endif %}
+          </td>
+          <td class="text-end text-nowrap">
+            <a class="btn-app-secondary py-1 px-2 small me-1 d-inline-flex" href="{% url 'treatment-edit' treatment.pk %}" title="Modifier ce soin">
+              <i class="bi bi-pencil"></i>
+            </a>
+            <a class="btn-app-danger py-1 px-2 small d-inline-flex" href="{% url 'treatment-delete' treatment.pk %}" title="Supprimer ce soin">
+              <i class="bi bi-trash3"></i>
+            </a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="text-center py-5 text-muted">
+    <i class="bi bi-clipboard-pulse fs-1 text-muted d-block mb-3"></i>
+    <div class="fw-bold fs-5 text-dark">Aucun soin planifié pour ce lot</div>
+    <p class="small mb-4" style="max-width: 460px; margin: 0 auto;">
+      Vous pouvez ajouter des soins personnalisés à n'importe quel jour (J1 à J45) ou appliquer le programme de prophylaxie de référence.
+    </p>
+    <div class="d-flex justify-content-center gap-3">
+      <a class="btn-app-primary" href="{% url 'treatment-create' %}?batch={{ batch.pk }}">
+        <i class="bi bi-plus-lg"></i>
+        <span>Ajouter un soin à ce lot</span>
+      </a>
+      <a class="btn-app-secondary" href="{% url 'prophylaxis-program-list' %}">
+        <i class="bi bi-shield-lock"></i>
+        <span>Configurer le programme J1-J45</span>
+      </a>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

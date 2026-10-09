@@ -1,0 +1,161 @@
+{% extends 'base.html' %}
+{% block title %}Dépenses & Charges · Gestion Chair{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="page-header-info">
+    <div class="d-flex align-items-center gap-2">
+      <span class="page-tag"><i class="bi bi-wallet2 text-success"></i> COMPTABILITÉ AVICOLE</span>
+    </div>
+    <h1 class="page-title">Dépenses & Charges</h1>
+    <p class="page-subtitle">
+      Suivi rigoureux des investissements fixes (bâtiment, matériel) et des charges directes d'exploitation.
+    </p>
+  </div>
+  <div class="page-header-actions">
+    <a class="btn-app-primary" href="{% url 'expense-create' %}">
+      <i class="bi bi-plus-circle-fill"></i>
+      <span>Nouvelle dépense</span>
+    </a>
+  </div>
+</div>
+
+<!-- Financial Summary KPI -->
+<div class="row g-4 mb-4">
+  <div class="col-md-5 col-lg-4">
+    <div class="kpi-card kpi-card-rose">
+      <div class="kpi-top">
+        <span class="kpi-label">Total des dépenses filtrées</span>
+        <div class="kpi-icon">
+          <i class="bi bi-receipt-cutoff"></i>
+        </div>
+      </div>
+      <div class="kpi-value text-danger">{{ total_amount|floatformat:0 }} <small class="fs-6 text-muted">FCFA</small></div>
+      <div class="kpi-footer">
+        <span class="app-badge badge-neutral-soft">
+          <i class="bi bi-list-check"></i>
+          {{ expenses|length }} ligne(s) enregistrée(s)
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Filter Card -->
+  <div class="col-md-7 col-lg-8">
+    <div class="app-card h-100 d-flex flex-column justify-content-center">
+      <div class="d-flex align-items-center gap-2 mb-3">
+        <i class="bi bi-funnel text-primary fs-5"></i>
+        <h3 class="fs-6 fw-bold mb-0">Filtrer les écritures comptables</h3>
+      </div>
+      <form method="get" class="row g-2 align-items-end">
+        <div class="col-sm-5">
+          <label class="form-label mb-1" for="filter-batch">Lot rattaché</label>
+          <select id="filter-batch" name="batch" class="form-select form-select-sm" onchange="this.form.submit()">
+            <option value="">Tous les lots & charges d'exploitation</option>
+            <option value="general" {% if selected_batch == 'general' %}selected{% endif %}>Charges fixes ferme (sans lot)</option>
+            {% for b in batches %}
+              <option value="{{ b.pk }}" {% if selected_batch == b.pk|stringformat:'s' %}selected{% endif %}>{{ b.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-sm-5">
+          <label class="form-label mb-1" for="filter-category">Catégorie</label>
+          <select id="filter-category" name="category" class="form-select form-select-sm" onchange="this.form.submit()">
+            <option value="">Toutes les catégories</option>
+            {% for cat in categories %}
+              <option value="{{ cat.pk }}" {% if selected_category == cat.pk|stringformat:'s' %}selected{% endif %}>
+                {{ cat.name }} {% if cat.is_investment %}(Immo {{ cat.useful_life_months }}m){% endif %}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-sm-2">
+          <a href="{% url 'expense-list' %}" class="btn-app-secondary w-100 justify-content-center py-1 small">
+            <i class="bi bi-arrow-counterclockwise"></i> Reset
+          </a>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- Expenses Table -->
+<div class="app-card">
+  <div class="card-header-clean">
+    <h2 class="card-title-clean">
+      <i class="bi bi-journal-text"></i>
+      <span>Livre des dépenses</span>
+    </h2>
+  </div>
+
+  {% if expenses %}
+  <div class="app-table-wrapper">
+    <table class="app-table">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Désignation</th>
+          <th>Catégorie</th>
+          <th>Affectation</th>
+          <th class="text-end">Montant</th>
+          <th class="text-center">Justificatif</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for expense in expenses %}
+        <tr>
+          <td class="text-nowrap">{{ expense.date|date:'d/m/Y' }}</td>
+          <td class="fw-bold text-dark">{{ expense.designation }}</td>
+          <td>
+            {% if expense.category.is_investment %}
+              <span class="app-badge badge-info-soft" title="Amorti sur {{ expense.category.useful_life_months }} mois">
+                <i class="bi bi-building me-1"></i> {{ expense.category.name }}
+              </span>
+            {% else %}
+              <span class="app-badge badge-neutral-soft">
+                <i class="bi bi-tag me-1"></i> {{ expense.category.name }}
+              </span>
+            {% endif %}
+          </td>
+          <td>
+            {% if expense.batch %}
+              <span class="app-badge badge-success-soft">
+                <i class="bi bi-layers me-1"></i> {{ expense.batch.name }}
+              </span>
+            {% else %}
+              <span class="text-muted small">
+                <i class="bi bi-house me-1"></i> Fixe exploitation
+              </span>
+            {% endif %}
+          </td>
+          <td class="text-end fw-bold fs-6 text-dark text-nowrap">
+            {{ expense.amount|floatformat:0 }} <small class="text-muted fw-normal">FCFA</small>
+          </td>
+          <td class="text-center">
+            {% if expense.invoice_file %}
+              <a href="{{ expense.invoice_file.url }}" target="_blank" class="btn-app-secondary py-1 px-2 small d-inline-flex" title="Ouvrir la facture">
+                <i class="bi bi-paperclip"></i>
+                <span class="d-none d-md-inline">Voir</span>
+              </a>
+            {% else %}
+              <span class="text-muted">—</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="text-center py-5 text-muted">
+    <i class="bi bi-receipt fs-1 text-muted d-block mb-3"></i>
+    <div class="fw-bold fs-5">Aucune dépense trouvée</div>
+    <p class="small mb-4">Aucune écriture comptable ne correspond aux critères sélectionnés.</p>
+    <a class="btn-app-primary d-inline-flex" href="{% url 'expense-create' %}">
+      <i class="bi bi-plus-lg"></i>
+      <span>Enregistrer une dépense</span>
+    </a>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

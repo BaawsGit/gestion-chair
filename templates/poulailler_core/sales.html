@@ -1,0 +1,175 @@
+{% extends 'base.html' %}
+{% block title %}Ventes & Sorties · Gestion Chair{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="page-header-info">
+    <div class="d-flex align-items-center gap-2">
+      <span class="page-tag"><i class="bi bi-cart-check text-success"></i> COMMERCIALISATION</span>
+    </div>
+    <h1 class="page-title">Ventes & Sorties du Poulailler</h1>
+    <p class="page-subtitle">
+      Suivi des enlèvements de poulets de chair, des pesées et du recouvrement des paiements.
+    </p>
+  </div>
+  <div class="page-header-actions">
+    <a class="btn-app-primary" href="{% url 'sale-create' %}">
+      <i class="bi bi-plus-circle-fill"></i>
+      <span>Nouvelle vente</span>
+    </a>
+  </div>
+</div>
+
+<!-- Sales KPIs -->
+<section class="metrics-row" aria-label="Statistiques des ventes">
+  <article class="kpi-card kpi-card-amber">
+    <div class="kpi-top">
+      <span class="kpi-label">Chiffre d'Affaires Réalisé</span>
+      <div class="kpi-icon">
+        <i class="bi bi-cash-stack"></i>
+      </div>
+    </div>
+    <div class="kpi-value text-warning-emphasis">{{ total_revenue|floatformat:0 }} <small class="fs-6 text-muted">FCFA</small></div>
+    <div class="kpi-footer">
+      <span class="app-badge badge-warning-soft">
+        <i class="bi bi-receipt"></i>
+        {{ sales|length }} transaction(s) enregistrée(s)
+      </span>
+    </div>
+  </article>
+
+  <article class="kpi-card kpi-card-emerald">
+    <div class="kpi-top">
+      <span class="kpi-label">Poulets Vendus</span>
+      <div class="kpi-icon">
+        <i class="bi bi-feather"></i>
+      </div>
+    </div>
+    <div class="kpi-value text-success">{{ total_sold }} <small class="fs-6 text-muted">sujets</small></div>
+    <div class="kpi-footer">
+      <span class="app-badge badge-success-soft">
+        <i class="bi bi-check-lg"></i>
+        Sortis du cheptel
+      </span>
+    </div>
+  </article>
+
+  <article class="kpi-card kpi-card-indigo">
+    <div class="kpi-top">
+      <span class="kpi-label">Biomasse & Poids Moyen</span>
+      <div class="kpi-icon">
+        <i class="bi bi-speedometer2"></i>
+      </div>
+    </div>
+    <div class="kpi-value">{{ total_weight|floatformat:1 }} <small class="fs-6 text-muted">kg</small></div>
+    <div class="kpi-footer">
+      <span class="text-muted">
+        {% if total_sold %}
+          Moyenne : <strong>{{ total_weight|floatformat:2 }} kg / sujet</strong>
+        {% else %}
+          —
+        {% endif %}
+      </span>
+    </div>
+  </article>
+</section>
+
+<!-- Filter Card -->
+<div class="app-card mb-4">
+  <form method="get" class="row g-2 align-items-center">
+    <div class="col-md-6">
+      <label class="form-label mb-1" for="filter-sale-batch">
+        <i class="bi bi-filter me-1 text-muted"></i> Filtrer par lot de production
+      </label>
+      <select id="filter-sale-batch" name="batch" class="form-select form-select-sm" onchange="this.form.submit()">
+        <option value="">Tous les lots</option>
+        {% for b in batches %}
+          <option value="{{ b.pk }}" {% if selected_batch == b.pk|stringformat:'s' %}selected{% endif %}>
+            {{ b.name }} ({{ b.get_status_display }})
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-3 d-flex align-items-end">
+      <a href="{% url 'sale-list' %}" class="btn-app-secondary btn-sm">
+        <i class="bi bi-arrow-counterclockwise"></i> Réinitialiser
+      </a>
+    </div>
+  </form>
+</div>
+
+<!-- Sales Transactions Table -->
+<div class="app-card">
+  <div class="card-header-clean">
+    <h2 class="card-title-clean">
+      <i class="bi bi-clock-history"></i>
+      <span>Historique des ventes</span>
+    </h2>
+  </div>
+
+  {% if sales %}
+  <div class="app-table-wrapper">
+    <table class="app-table">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Lot</th>
+          <th>Client</th>
+          <th>Quantité</th>
+          <th>Poids total</th>
+          <th>Prix unitaire</th>
+          <th class="text-end">Montant total</th>
+          <th class="text-center">Statut de paiement</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for sale in sales %}
+        <tr>
+          <td class="text-nowrap">{{ sale.date|date:'d/m/Y' }}</td>
+          <td>
+            <span class="app-badge badge-neutral-soft">
+              <i class="bi bi-layers me-1"></i> {{ sale.batch.name }}
+            </span>
+          </td>
+          <td class="fw-bold text-dark">{{ sale.customer_name|default:'Vente comptoir' }}</td>
+          <td class="fw-bold text-success">{{ sale.quantity_sold }} sujets</td>
+          <td>
+            {% if sale.total_weight_kg %}
+              {{ sale.total_weight_kg|floatformat:1 }} kg
+            {% else %}
+              <span class="text-muted">—</span>
+            {% endif %}
+          </td>
+          <td>{{ sale.unit_price|floatformat:0 }} FCFA</td>
+          <td class="text-end fw-bold fs-6 text-dark text-nowrap">
+            {{ sale.total_amount|floatformat:0 }} <small class="text-muted fw-normal">FCFA</small>
+          </td>
+          <td class="text-center">
+            {% if sale.payment_status == 'paid' %}
+              <span class="app-badge badge-success-soft">
+                <i class="bi bi-check-circle-fill"></i> Payé
+              </span>
+            {% else %}
+              <span class="app-badge badge-warning-soft">
+                <i class="bi bi-hourglass-split"></i> Crédit / Avance
+              </span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="text-center py-5 text-muted">
+    <i class="bi bi-cart-x fs-1 text-muted d-block mb-3"></i>
+    <div class="fw-bold fs-5">Aucune vente enregistrée</div>
+    <p class="small mb-4">Les sorties de volailles s'afficheront ici dès qu'une première vente sera enregistrée.</p>
+    <a class="btn-app-primary d-inline-flex" href="{% url 'sale-create' %}">
+      <i class="bi bi-plus-lg"></i>
+      <span>Enregistrer une vente</span>
+    </a>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

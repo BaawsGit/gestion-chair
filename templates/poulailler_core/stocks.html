@@ -1,0 +1,161 @@
+{% extends 'base.html' %}
+{% block title %}Stocks d'aliments · Gestion Chair{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="page-header-info">
+    <div class="d-flex align-items-center gap-2">
+      <span class="page-tag"><i class="bi bi-box-seam text-success"></i> GESTION NUTRITIONNELLE</span>
+    </div>
+    <h1 class="page-title">Stocks d'Aliments & Réceptions</h1>
+    <p class="page-subtitle">
+      Surveillez les disponibilités en temps réel, prévenez les ruptures et suivez la consommation par lot.
+    </p>
+  </div>
+  <div class="page-header-actions">
+    <a class="btn-app-secondary" href="{% url 'daily-entry' %}">
+      <i class="bi bi-calendar2-plus"></i>
+      <span>Distribuer (Journal)</span>
+    </a>
+    <a class="btn-app-primary" href="{% url 'feed-purchase' %}">
+      <i class="bi bi-plus-circle-fill"></i>
+      <span>Réceptionner un stock</span>
+    </a>
+  </div>
+</div>
+
+<!-- Stock Availability 3 Cards -->
+<div class="app-card mb-4">
+  <div class="card-header-clean">
+    <h2 class="card-title-clean">
+      <i class="bi bi-boxes"></i>
+      <span>Disponibilités en stock</span>
+    </h2>
+  </div>
+
+  <div class="row g-4">
+    {% for key, stock in feed_stock.items %}
+    <div class="col-md-4">
+      <div class="p-4 rounded-3 border bg-light h-100 d-flex flex-column justify-content-between">
+        <div>
+          <div class="d-flex align-items-center justify-content-between mb-2">
+            <span class="text-uppercase fw-bold small text-muted">{{ stock.label }}</span>
+            <span class="app-badge {% if stock.remaining_kg > 50 %}badge-success-soft{% else %}badge-warning-soft{% endif %}">
+              <i class="bi bi-record-circle-fill"></i> Dispo
+            </span>
+          </div>
+          <div class="display-6 fw-bold text-success mb-1">
+            {{ stock.remaining_kg|floatformat:1 }} <span class="fs-5 text-muted fw-normal">kg</span>
+          </div>
+          <div class="text-muted small">
+            ≈ <strong>{{ stock.remaining_bags|floatformat:1 }}</strong> sac(s) en magasin
+          </div>
+        </div>
+
+        <div class="pt-3 mt-3 border-top d-flex justify-content-between align-items-center small text-muted">
+          <span>Seuil alerte : 50 kg</span>
+          <i class="bi bi-shield-check text-success"></i>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+
+<!-- Two Columns: Purchases (Receptions) & Consumptions (Distributions) -->
+<div class="row g-4">
+  <!-- Purchases Table -->
+  <div class="col-lg-6">
+    <div class="app-card h-100">
+      <div class="card-header-clean">
+        <h2 class="card-title-clean">
+          <i class="bi bi-truck"></i>
+          <span>Dernières réceptions fournisseurs</span>
+        </h2>
+        <a class="small text-muted fw-semibold" href="{% url 'feed-purchase' %}">
+          + Ajouter <i class="bi bi-arrow-right"></i>
+        </a>
+      </div>
+
+      {% if purchases %}
+      <div class="app-table-wrapper">
+        <table class="app-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Aliment</th>
+              <th>Sacs</th>
+              <th>Poids/Sac</th>
+              <th>Prix unitaire</th>
+              <th>Fournisseur</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for p in purchases %}
+            <tr>
+              <td class="text-nowrap">{{ p.purchase_date|date:'d/m/Y' }}</td>
+              <td class="fw-bold text-dark">{{ p.get_feed_type_display }}</td>
+              <td class="fw-bold text-success">{{ p.bags_purchased }}</td>
+              <td>{{ p.bag_weight_kg|floatformat:0 }} kg</td>
+              <td>{{ p.unit_price|floatformat:0 }} FCFA</td>
+              <td class="text-muted small">{{ p.supplier|default:'—' }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="text-muted small py-4 text-center mb-0">Aucune réception de stock enregistrée.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Consumptions Table -->
+  <div class="col-lg-6">
+    <div class="app-card h-100">
+      <div class="card-header-clean">
+        <h2 class="card-title-clean">
+          <i class="bi bi-pie-chart"></i>
+          <span>Dernières distributions aux poulets</span>
+        </h2>
+        <a class="small text-muted fw-semibold" href="{% url 'daily-entry' %}">
+          + Distribuer <i class="bi bi-arrow-right"></i>
+        </a>
+      </div>
+
+      {% if consumptions %}
+      <div class="app-table-wrapper">
+        <table class="app-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Lot</th>
+              <th>Aliment</th>
+              <th>Sacs</th>
+              <th class="text-end">Quantité kg</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for c in consumptions %}
+            <tr>
+              <td class="text-nowrap">{{ c.date|date:'d/m/Y' }}</td>
+              <td>
+                <span class="app-badge badge-neutral-soft">
+                  <i class="bi bi-layers me-1"></i> {{ c.batch.name }}
+                </span>
+              </td>
+              <td class="fw-bold text-dark">{{ c.get_feed_type_display }}</td>
+              <td>{{ c.bags_consumed|default:'—' }}</td>
+              <td class="text-end fw-bold text-success">{{ c.kg_consumed|default:'—' }} kg</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="text-muted small py-4 text-center mb-0">Aucune distribution enregistrée pour le moment.</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

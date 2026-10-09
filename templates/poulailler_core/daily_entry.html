@@ -1,0 +1,280 @@
+{% extends 'base.html' %}
+{% block title %}Journal du jour · {{ batch.name }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="page-header-info">
+    <div class="d-flex align-items-center gap-2">
+      <span class="page-tag"><i class="bi bi-calendar-check text-success"></i> SAISIE QUOTIDIENNE</span>
+      <span class="app-badge badge-success-soft fw-bold">{{ batch.name }}</span>
+    </div>
+    <h1 class="page-title">Journal du jour</h1>
+    <p class="page-subtitle">
+      <span>Cycle démarré le {{ batch.start_date|date:'d/m/Y' }}</span>
+      <span>•</span>
+      <span>Aujourd'hui : Jour <strong>{{ batch.current_age_days }}</strong> / {{ batch.target_duration_days }}</span>
+    </p>
+  </div>
+  <div class="page-header-actions">
+    <a class="btn-app-secondary" href="{% url 'dashboard' %}">
+      <i class="bi bi-speedometer2"></i>
+      <span>Tableau de bord</span>
+    </a>
+  </div>
+</div>
+
+<!-- Date Switcher / Mode Banner -->
+<div class="app-card mb-4">
+  <div class="d-flex align-items-center justify-content-between flex-wrap gap-3">
+    <div class="d-flex align-items-center gap-3">
+      <div class="kpi-icon" style="background-color: var(--primary-50); color: var(--primary-700); width: 42px; height: 42px;">
+        <i class="bi bi-calendar-date fs-5"></i>
+      </div>
+      <div>
+        <div class="fw-bold fs-6 text-dark">
+          Date sélectionnée : <span class="text-success">{{ target_date|date:'d/m/Y' }}</span> (Jour J{{ day_age }})
+        </div>
+        <div class="small text-muted">
+          {% if is_editing %}
+            <span class="text-warning fw-semibold"><i class="bi bi-pencil-fill me-1"></i> Mode modification :</span> Une saisie existe déjà pour cette date. Vous pouvez ajuster les valeurs ci-dessous.
+          {% else %}
+            <span>Nouvelle saisie pour cette date.</span>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <!-- Quick Date Selector -->
+    <form method="get" class="d-flex align-items-center gap-2">
+      <label for="date-selector" class="small fw-semibold text-muted mb-0">Changer de date :</label>
+      <input type="date" id="date-selector" name="date" value="{{ target_date|date:'Y-m-d' }}" class="form-control form-control-sm" style="width: auto;" onchange="this.form.submit()">
+    </form>
+  </div>
+</div>
+
+<!-- Main Daily Form -->
+<form method="post" class="app-form-card mb-5">
+  {% csrf_token %}
+
+  {% if form.non_field_errors %}
+  <div class="app-alert app-alert-danger mb-4">
+    <i class="bi bi-exclamation-triangle-fill fs-5 text-danger"></i>
+    <div>{{ form.non_field_errors }}</div>
+  </div>
+  {% endif %}
+
+  <!-- 1. Date & Mortalité -->
+  <div class="mb-4 pb-4 border-bottom">
+    <div class="d-flex align-items-center gap-2 mb-3">
+      <div class="kpi-icon" style="background-color: var(--accent-rose-light); color: var(--accent-rose); width: 34px; height: 34px;">
+        <i class="bi bi-heart-pulse"></i>
+      </div>
+      <div>
+        <h3 class="fs-5 fw-bold mb-0 text-dark">Date & Mortalité</h3>
+        <p class="text-muted small mb-0">Contrôle sanitaire et pertes constatées</p>
+      </div>
+    </div>
+
+    <div class="row g-3">
+      <div class="col-md-4">
+        <label class="form-label" for="id_date">
+          <i class="bi bi-calendar3 me-1 text-muted"></i> Date du relevé
+        </label>
+        {{ form.date }}
+        {{ form.date.errors }}
+      </div>
+
+      <div class="col-md-4">
+        <label class="form-label text-danger" for="id_mortality_count">
+          <i class="bi bi-x-circle me-1 text-danger"></i> Sujets décédés ce jour
+        </label>
+        {{ form.mortality_count }}
+        {{ form.mortality_count.errors }}
+        <div class="form-text">Indiquer 0 s'il n'y a eu aucune perte.</div>
+      </div>
+
+      <div class="col-md-4">
+        <label class="form-label" for="id_cause_suspected">
+          <i class="bi bi-question-circle me-1 text-muted"></i> Cause présumée
+        </label>
+        {{ form.cause_suspected }}
+      </div>
+
+      <div class="col-12">
+        <label class="form-label" for="id_mortality_notes">
+          <i class="bi bi-pencil-square me-1 text-muted"></i> Observations / Symptômes constatés
+        </label>
+        {{ form.mortality_notes }}
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. Alimentation distribuée -->
+  <div class="mb-4 pb-4 border-bottom">
+    <div class="d-flex align-items-center gap-2 mb-3">
+      <div class="kpi-icon" style="background-color: var(--primary-50); color: var(--primary-600); width: 34px; height: 34px;">
+        <i class="bi bi-basket2"></i>
+      </div>
+      <div>
+        <h3 class="fs-5 fw-bold mb-0 text-dark">Ration d'aliment distribuée</h3>
+        <p class="text-muted small mb-0">Consommation journalière déduite du stock disponible</p>
+      </div>
+    </div>
+
+    <div class="row g-3">
+      <div class="col-md-4">
+        <label class="form-label" for="id_feed_type">
+          <i class="bi bi-tag me-1 text-muted"></i> Type d'aliment
+        </label>
+        {{ form.feed_type }}
+      </div>
+
+      <div class="col-md-4">
+        <label class="form-label" for="id_bags_consumed">
+          <i class="bi bi-box me-1 text-muted"></i> Sacs distribués
+        </label>
+        {{ form.bags_consumed }}
+        <div class="form-text">Ex: 1 ou 0.5 sac</div>
+      </div>
+
+      <div class="col-md-4">
+        <label class="form-label" for="id_kg_consumed">
+          <i class="bi bi-speedometer me-1 text-muted"></i> Ou en Kilogrammes
+        </label>
+        {{ form.kg_consumed }}
+        <div class="form-text">Ex: 12.5 ou 25 kg</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. Traitements prophylactiques administrés -->
+  <div class="mb-4">
+    <div class="d-flex align-items-center gap-2 mb-3">
+      <div class="kpi-icon" style="background-color: var(--accent-amber-light); color: var(--accent-amber-dark); width: 34px; height: 34px;">
+        <i class="bi bi-shield-plus"></i>
+      </div>
+      <div>
+        <h3 class="fs-5 fw-bold mb-0 text-dark">Médicaments & Soins du jour</h3>
+        <p class="text-muted small mb-0">Cochez les soins effectués ce jour dans le poulailler</p>
+      </div>
+    </div>
+
+    <div class="p-3 bg-light rounded-3 border">
+      <div class="treatment-selection-list">
+        {{ form.treatments }}
+      </div>
+      {{ form.treatments.errors }}
+    </div>
+    <div class="form-text mt-2">
+      <i class="bi bi-info-circle me-1"></i> Cochez pour valider l'administration. Décochez pour annuler la validation de ce soin.
+    </div>
+  </div>
+
+  <!-- Form Actions -->
+  <div class="d-flex align-items-center justify-content-between pt-3 border-top flex-wrap gap-2">
+    <div class="d-flex align-items-center gap-3">
+      <button class="btn-app-primary" type="submit">
+        <i class="bi bi-check-circle-fill"></i>
+        <span>{% if is_editing %}Mettre à jour cette saisie{% else %}Enregistrer la journée{% endif %}</span>
+      </button>
+      <a class="btn-app-secondary" href="{% url 'dashboard' %}">
+        <span>Annuler</span>
+      </a>
+    </div>
+
+    {% if is_editing %}
+    <a class="btn-app-danger small py-1 px-3" href="{% url 'daily-entry-delete' target_date|date:'Y-m-d' %}">
+      <i class="bi bi-trash3"></i>
+      <span>Supprimer cette saisie</span>
+    </a>
+    {% endif %}
+  </div>
+</form>
+
+<!-- Historical Daily Entries Table -->
+<div class="app-card">
+  <div class="card-header-clean">
+    <h2 class="card-title-clean">
+      <i class="bi bi-clock-history"></i>
+      <span>Historique des saisies journalières ({{ history_entries|length }})</span>
+    </h2>
+    <span class="small text-muted">Cliquez sur « Modifier » pour corriger n'importe quel jour</span>
+  </div>
+
+  {% if history_entries %}
+  <div class="app-table-wrapper">
+    <table class="app-table">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Âge du lot</th>
+          <th>Pertes / Mortalité</th>
+          <th>Alimentation distribuée</th>
+          <th>Soins administrés</th>
+          <th class="text-end">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for entry in history_entries %}
+        <tr {% if entry.is_selected %}class="table-success bg-opacity-25"{% endif %}>
+          <td class="text-nowrap fw-bold text-dark">
+            {{ entry.date|date:'d/m/Y' }}
+          </td>
+          <td>
+            <span class="app-badge badge-neutral-soft">Jour J{{ entry.age_days }}</span>
+          </td>
+          <td>
+            {% if entry.mortality and entry.mortality.count > 0 %}
+              <span class="app-badge badge-danger-soft">
+                {{ entry.mortality.count }} mort(s) ({{ entry.mortality.get_cause_suspected_display }})
+              </span>
+              {% if entry.mortality.notes %}
+                <div class="small text-muted">{{ entry.mortality.notes }}</div>
+              {% endif %}
+            {% else %}
+              <span class="text-success small fw-semibold">0 perte</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if entry.feed %}
+              <div class="fw-semibold text-dark">{{ entry.feed.get_feed_type_display }}</div>
+              <div class="small text-muted">
+                {% if entry.feed.bags_consumed %}{{ entry.feed.bags_consumed }} sac(s){% endif %}
+                {% if entry.feed.kg_consumed %} • {{ entry.feed.kg_consumed }} kg{% endif %}
+              </div>
+            {% else %}
+              <span class="text-muted small">—</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if entry.treatments %}
+              {% for t in entry.treatments %}
+                <span class="app-badge badge-success-soft py-0 px-2 me-1 mb-1">
+                  <i class="bi bi-check2"></i> {{ t.medicine_name }}
+                </span>
+              {% endfor %}
+            {% else %}
+              <span class="text-muted small">—</span>
+            {% endif %}
+          </td>
+          <td class="text-end text-nowrap">
+            <a class="btn-app-secondary py-1 px-3 small me-1 d-inline-flex" href="?date={{ entry.date|date:'Y-m-d' }}" title="Modifier cette saisie">
+              <i class="bi bi-pencil-fill me-1"></i> Modifier
+            </a>
+            <a class="btn-app-danger py-1 px-2 small d-inline-flex" href="{% url 'daily-entry-delete' entry.date|date:'Y-m-d' %}" title="Supprimer">
+              <i class="bi bi-trash3"></i>
+            </a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="text-center py-4 text-muted">
+    <i class="bi bi-journal-x fs-2 text-muted d-block mb-2"></i>
+    <span>Aucune saisie journalière enregistrée pour le moment.</span>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

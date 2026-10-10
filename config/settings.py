@@ -70,12 +70,12 @@ if database_url:
     DATABASES = {
         "default": dj_database_url.config(
             default=database_url,
-            conn_max_age=600,
+            conn_max_age=int(os.environ.get("CONN_MAX_AGE", "0" if os.environ.get("VERCEL") else "60")),
             conn_health_checks=True,
         )
     }
 else:
-    db_engine = os.environ.get("DB_ENGINE", "postgresql").lower()
+    db_engine = os.environ.get("DB_ENGINE", "sqlite3" if os.environ.get("VERCEL") else "postgresql").lower()
     if db_engine in {"sqlite", "sqlite3"}:
         DATABASES = {
             "default": {

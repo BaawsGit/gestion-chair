@@ -1,0 +1,3 @@
+# Garantir les sauts de ligne LF sous Linux/Vercel pour les scripts shell
+*.sh text eol=lf
+*.json text eol=lf

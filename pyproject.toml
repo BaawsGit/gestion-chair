@@ -6,8 +6,8 @@ requires-python = ">=3.11"
 dependencies = [
     "Django>=5.2,<5.3",
     "psycopg[binary]>=3.2,<4.0",
+    "psycopg2-binary>=2.9.9",
     "python-dotenv>=1.0,<2.0",
     "whitenoise>=6.6.0",
     "dj-database-url>=2.1.0",
 ]
-

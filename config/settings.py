@@ -1,7 +1,11 @@
 import os
 from pathlib import Path
 
-import dj_database_url
+try:
+    import dj_database_url
+except ImportError:
+    dj_database_url = None
+from urllib.parse import urlparse, unquote
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -67,13 +71,27 @@ ASGI_APPLICATION = "config.asgi.application"
 # Base de données : priorité à DATABASE_URL / POSTGRES_URL (Vercel / Neon / Supabase), sinon DB_ENGINE (.env)
 database_url = os.environ.get("DATABASE_URL") or os.environ.get("POSTGRES_URL")
 if database_url:
-    DATABASES = {
-        "default": dj_database_url.config(
-            default=database_url,
-            conn_max_age=int(os.environ.get("CONN_MAX_AGE", "0" if os.environ.get("VERCEL") else "60")),
-            conn_health_checks=True,
-        )
-    }
+    if dj_database_url:
+        DATABASES = {
+            "default": dj_database_url.config(
+                default=database_url,
+                conn_max_age=int(os.environ.get("CONN_MAX_AGE", "0" if os.environ.get("VERCEL") else "60")),
+                conn_health_checks=True,
+            )
+        }
+    else:
+        parsed_db = urlparse(database_url)
+        DATABASES = {
+            "default": {
+                "ENGINE": "django.db.backends.postgresql",
+                "NAME": parsed_db.path.lstrip("/"),
+                "USER": unquote(parsed_db.username or ""),
+                "PASSWORD": unquote(parsed_db.password or ""),
+                "HOST": parsed_db.hostname or "",
+                "PORT": str(parsed_db.port or 5432),
+                "CONN_MAX_AGE": int(os.environ.get("CONN_MAX_AGE", "0" if os.environ.get("VERCEL") else "60")),
+            }
+        }
 else:
     db_engine = os.environ.get("DB_ENGINE", "sqlite3" if os.environ.get("VERCEL") else "postgresql").lower()
     if db_engine in {"sqlite", "sqlite3"}:

@@ -59,7 +59,7 @@ TEMPLATES = [
     },
 ]
 WSGI_APPLICATION = "config.wsgi.application"
-ASGI_APPLICATION = "config.asgi.application"
+# ASGI_APPLICATION = "config.asgi.application"
 
 # Base de données : priorité à DATABASE_URL / POSTGRES_URL (Vercel / Neon / Supabase), sinon DB_ENGINE (.env)
 database_url = os.environ.get("DATABASE_URL") or os.environ.get("POSTGRES_URL")

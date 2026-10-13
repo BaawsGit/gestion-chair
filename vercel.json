@@ -1,5 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "bash build_files.sh",
   "functions": {
     "config/wsgi.py": {
       "maxDuration": 60

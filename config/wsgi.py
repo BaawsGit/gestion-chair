@@ -16,7 +16,9 @@ def apply_pending_migrations():
             from django.core.management import call_command
             print("Auto-migration Vercel : vérification et application...")
             call_command("migrate", interactive=False)
-            print("Auto-migration Vercel : terminée avec succès.")
+            from poulailler_core.auth_setup import ensure_default_accounts
+            ensure_default_accounts()
+            print("Auto-migration Vercel : terminée avec succès (comptes configurés).")
         except Exception as e:
             print("Avertissement auto-migration Vercel:", e)
 

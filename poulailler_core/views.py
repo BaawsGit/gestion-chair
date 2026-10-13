@@ -1,3 +1,4 @@
+from functools import wraps
 from datetime import datetime, timedelta
 from decimal import Decimal
 
@@ -37,6 +38,23 @@ from .models import (
     Sale,
 )
 from .signals import sync_batch_treatments
+
+
+def admin_required(view_func):
+    """Restreint l'exécution de la vue aux administrateurs (is_staff ou is_superuser)."""
+    @wraps(view_func)
+    def _wrapped_view(request, *args, **kwargs):
+        if not (request.user.is_staff or request.user.is_superuser):
+            messages.warning(
+                request,
+                "Action non autorisée : votre compte est en mode consultation seule. Seul l'administrateur peut effectuer des opérations d'écriture."
+            )
+            referer = request.META.get("HTTP_REFERER")
+            if referer:
+                return redirect(referer)
+            return redirect("dashboard")
+        return view_func(request, *args, **kwargs)
+    return _wrapped_view
 
 
 @login_required
@@ -94,8 +112,11 @@ def dashboard(request):
 def daily_entry(request):
     batch = Batch.objects.filter(status=Batch.Status.ACTIVE).order_by("-start_date").first()
     if batch is None:
-        messages.warning(request, "Créez d'abord un lot actif.")
-        return redirect("batch-create")
+        if request.user.is_staff or request.user.is_superuser:
+            messages.warning(request, "Créez d'abord un lot actif.")
+            return redirect("batch-create")
+        messages.warning(request, "Aucun lot actif pour le moment.")
+        return redirect("dashboard")
 
     # Determine target date for edition or new entry
     target_date_str = request.POST.get("date") if request.method == "POST" else request.GET.get("date")
@@ -114,6 +135,13 @@ def daily_entry(request):
     is_editing = bool(existing_mortality or existing_feed or administered_treatments.exists())
 
     if request.method == "POST":
+        if not (request.user.is_staff or request.user.is_superuser):
+            messages.warning(
+                request,
+                "Action non autorisée : votre compte est en mode consultation seule. Seul l'administrateur peut enregistrer des données au journal."
+            )
+            return redirect("daily-entry")
+
         form = DailyEventForm(request.POST, batch=batch, target_date=target_date)
         if form.is_valid():
             data = form.cleaned_data
@@ -214,6 +242,7 @@ def daily_entry(request):
 
 
 @login_required
+@admin_required
 def daily_entry_delete(request, date_str):
     batch = Batch.objects.filter(status=Batch.Status.ACTIVE).order_by("-start_date").first()
     if not batch:
@@ -241,6 +270,7 @@ def daily_entry_delete(request, date_str):
 
 
 @login_required
+@admin_required
 def complete_treatment(request, pk):
     if request.method != "POST":
         return HttpResponseForbidden("Action POST requise.")
@@ -293,6 +323,7 @@ def treatment_list(request):
 
 
 @login_required
+@admin_required
 def treatment_create(request):
     batch_id = request.GET.get("batch") or request.POST.get("batch")
     initial = {}
@@ -322,6 +353,7 @@ def treatment_create(request):
 
 
 @login_required
+@admin_required
 def treatment_edit(request, pk):
     treatment = get_object_or_404(TreatmentLog, pk=pk)
     form = TreatmentLogForm(request.POST or None, instance=treatment)
@@ -338,6 +370,7 @@ def treatment_edit(request, pk):
 
 
 @login_required
+@admin_required
 def treatment_delete(request, pk):
     treatment = get_object_or_404(TreatmentLog, pk=pk)
     batch_pk = treatment.batch.pk
@@ -356,6 +389,7 @@ def treatment_delete(request, pk):
 
 
 @login_required
+@admin_required
 def treatment_sync_batch(request, pk):
     batch = get_object_or_404(Batch, pk=pk)
     if request.method == "POST":
@@ -395,6 +429,7 @@ def prophylaxis_program_list(request):
 
 
 @login_required
+@admin_required
 def prophylaxis_program_create(request):
     """
     Set medication for a single day or range of days (e.g. J1 to J3 = Tetracolivit).
@@ -459,6 +494,7 @@ def prophylaxis_program_create(request):
 
 
 @login_required
+@admin_required
 def prophylaxis_program_edit(request, pk):
     program = get_object_or_404(ProphylaxisProgram, pk=pk)
     initial = {
@@ -497,6 +533,7 @@ def prophylaxis_program_edit(request, pk):
 
 
 @login_required
+@admin_required
 def prophylaxis_program_duplicate(request, day):
     if day >= 45:
         messages.warning(request, "Impossible de dupliquer au-delà de J45.")
@@ -530,6 +567,7 @@ def prophylaxis_program_duplicate(request, day):
 
 
 @login_required
+@admin_required
 def prophylaxis_program_clear_day(request, day):
     if request.method == "POST":
         with transaction.atomic():
@@ -548,6 +586,7 @@ def prophylaxis_program_clear_day(request, day):
 
 
 @login_required
+@admin_required
 def prophylaxis_program_delete(request, pk):
     program = get_object_or_404(ProphylaxisProgram, pk=pk)
     day = program.target_day
@@ -569,6 +608,7 @@ def prophylaxis_program_delete(request, pk):
 
 
 @login_required
+@admin_required
 def batch_create(request):
     form = BatchForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
@@ -585,6 +625,7 @@ def batch_create(request):
 
 
 @login_required
+@admin_required
 def batch_edit(request, pk):
     batch = get_object_or_404(Batch, pk=pk)
     form = BatchForm(request.POST or None, instance=batch)
@@ -641,6 +682,7 @@ def expense_list(request):
 
 
 @login_required
+@admin_required
 def expense_create(request):
     form = ExpenseForm(request.POST or None, request.FILES or None)
     if request.method == "POST" and form.is_valid():
@@ -664,6 +706,7 @@ def feed_stock_view(request):
 
 
 @login_required
+@admin_required
 def feed_purchase(request):
     form = FeedInventoryForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
@@ -676,6 +719,7 @@ def feed_purchase(request):
 
 
 @login_required
+@admin_required
 def feed_purchase_edit(request, pk):
     inventory = get_object_or_404(FeedInventory, pk=pk)
     form = FeedInventoryForm(request.POST or None, instance=inventory)
@@ -692,6 +736,7 @@ def feed_purchase_edit(request, pk):
 
 
 @login_required
+@admin_required
 def feed_purchase_delete(request, pk):
     inventory = get_object_or_404(FeedInventory, pk=pk)
     if request.method == "POST":
@@ -732,6 +777,7 @@ def sale_list(request):
 
 
 @login_required
+@admin_required
 def sale_create(request):
     form = SaleForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
@@ -742,6 +788,7 @@ def sale_create(request):
 
 
 @login_required
+@admin_required
 def close_batch(request, pk):
     batch = get_object_or_404(Batch, pk=pk)
     if request.method == "POST":

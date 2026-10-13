@@ -13,10 +13,12 @@
     </p>
   </div>
   <div class="page-header-actions">
+    {% if user.is_staff %}
     <a class="btn-app-primary" href="{% url 'batch-create' %}">
       <i class="bi bi-plus-circle-fill"></i>
       <span>Nouveau lot</span>
     </a>
+    {% endif %}
   </div>
 </div>
 
@@ -74,10 +76,12 @@
           </td>
           <td class="text-end">
             <div class="d-inline-flex gap-2">
+              {% if user.is_staff %}
               <a class="btn-app-secondary py-1 px-2 small d-inline-flex align-items-center" href="{% url 'batch-edit' batch.pk %}" title="Modifier les paramètres du lot">
                 <i class="bi bi-pencil"></i>
                 <span class="d-none d-md-inline ms-1">Modifier</span>
               </a>
+              {% endif %}
               <a class="btn-app-secondary py-1 px-3 small d-inline-flex" href="{% url 'batch-report' batch.pk %}">
                 <i class="bi bi-file-earmark-text"></i>
                 <span>Voir le bilan</span>
@@ -94,10 +98,12 @@
     <i class="bi bi-layers fs-1 text-muted d-block mb-3"></i>
     <div class="fw-bold fs-5">Aucun lot enregistré</div>
     <p class="small mb-4">Créez votre première bande de poulets de chair pour démarrer.</p>
+    {% if user.is_staff %}
     <a class="btn-app-primary d-inline-flex" href="{% url 'batch-create' %}">
       <i class="bi bi-plus-lg"></i>
       <span>Créer un lot</span>
     </a>
+    {% endif %}
   </div>
   {% endif %}
 </div>

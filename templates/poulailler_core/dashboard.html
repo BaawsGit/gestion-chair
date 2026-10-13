@@ -64,6 +64,7 @@
       <span>Journal du jour</span>
     </a>
 
+    {% if user.is_staff %}
     <a class="btn-app-secondary" href="{% url 'batch-edit' batch.pk %}" title="Modifier les effectifs, bonus et prix du lot">
       <i class="bi bi-sliders"></i>
       <span>Paramètres lot</span>
@@ -79,7 +80,10 @@
         <i class="bi bi-check2-circle"></i>
         <span>Clôturer le lot</span>
       </a>
-    {% else %}
+    {% endif %}
+    {% endif %}
+
+    {% if batch.status != 'active' %}
       <a class="btn-app-secondary" href="{% url 'batch-report' batch.pk %}">
         <i class="bi bi-file-earmark-bar-graph"></i>
         <span>Bilan du lot</span>
@@ -87,6 +91,15 @@
     {% endif %}
   </div>
 </div>
+
+{% if not user.is_staff %}
+<div class="p-3 mb-4 rounded-3 d-flex align-items-center gap-3 small border" style="background: #f0f9ff; border-color: #bae6fd !important; color: #0369a1;">
+  <i class="bi bi-eye-fill fs-4 text-primary"></i>
+  <div>
+    <strong>Mode consultation (invité) :</strong> Vous visualisez les données en direct. Les fonctionnalités d'ajout, de modification et de clôture sont réservées au compte administrateur.
+  </div>
+</div>
+{% endif %}
 
 <!-- Production Cycle Progress Banner -->
 <div class="cycle-banner">
@@ -251,6 +264,7 @@
               {% endif %}
             </div>
           </div>
+          {% if user.is_staff %}
           <form method="post" action="{% url 'treatment-complete' treatment.pk %}" class="m-0">
             {% csrf_token %}
             <input type="hidden" name="next" value="{{ request.get_full_path }}">
@@ -259,6 +273,11 @@
               <span>Administré</span>
             </button>
           </form>
+          {% else %}
+          <span class="app-badge badge-warning-soft py-1 px-2" title="Traitement planifié (seul l'administrateur peut valider)">
+            <i class="bi bi-clock me-1"></i> Prévu
+          </span>
+          {% endif %}
         </div>
         {% endfor %}
       </div>

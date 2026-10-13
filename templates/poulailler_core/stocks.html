@@ -15,12 +15,14 @@
   <div class="page-header-actions">
     <a class="btn-app-secondary" href="{% url 'daily-entry' %}">
       <i class="bi bi-calendar2-plus"></i>
-      <span>Distribuer (Journal)</span>
+      <span>Historique distributions</span>
     </a>
+    {% if user.is_staff %}
     <a class="btn-app-primary" href="{% url 'feed-purchase' %}">
       <i class="bi bi-plus-circle-fill"></i>
       <span>Réceptionner un stock</span>
     </a>
+    {% endif %}
   </div>
 </div>
 
@@ -72,9 +74,11 @@
           <i class="bi bi-truck"></i>
           <span>Dernières réceptions fournisseurs</span>
         </h2>
+        {% if user.is_staff %}
         <a class="small text-muted fw-semibold" href="{% url 'feed-purchase' %}">
           + Ajouter <i class="bi bi-arrow-right"></i>
         </a>
+        {% endif %}
       </div>
 
       {% if purchases %}
@@ -87,7 +91,9 @@
               <th>Sacs</th>
               <th class="text-end">Montant</th>
               <th>Dépense</th>
+              {% if user.is_staff %}
               <th class="text-end">Actions</th>
+              {% endif %}
             </tr>
           </thead>
           <tbody>
@@ -122,6 +128,7 @@
                   <span class="app-badge badge-warning-soft">Non liée</span>
                 {% endif %}
               </td>
+              {% if user.is_staff %}
               <td class="text-end text-nowrap">
                 <a href="{% url 'feed-purchase-edit' p.pk %}" class="btn btn-sm btn-outline-secondary py-0 px-2 me-1" title="Modifier cette réception">
                   <i class="bi bi-pencil"></i>
@@ -130,6 +137,7 @@
                   <i class="bi bi-trash"></i>
                 </a>
               </td>
+              {% endif %}
             </tr>
             {% endfor %}
           </tbody>
@@ -149,9 +157,11 @@
           <i class="bi bi-pie-chart"></i>
           <span>Dernières distributions aux poulets</span>
         </h2>
+        {% if user.is_staff %}
         <a class="small text-muted fw-semibold" href="{% url 'daily-entry' %}">
           + Distribuer <i class="bi bi-arrow-right"></i>
         </a>
+        {% endif %}
       </div>
 
       {% if consumptions %}

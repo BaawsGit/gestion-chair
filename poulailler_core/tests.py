@@ -158,7 +158,7 @@ class BatchWorkflowTests(TestCase):
         self.assertContains(resp, "Disponibilités en stock")
 
     def test_close_batch_sets_end_date(self):
-        user = get_user_model().objects.create_user(username="closer", password="password123")
+        user = get_user_model().objects.create_user(username="closer", password="password123", is_staff=True)
         self.client.force_login(user)
         resp = self.client.post(f"/lots/{self.batch.pk}/cloturer/")
         self.assertEqual(resp.status_code, 302)
@@ -181,7 +181,7 @@ class BatchWorkflowTests(TestCase):
         self.assertTrue(FeedInventory.objects.exists())
 
     def test_daily_entry_create_modify_and_delete(self):
-        user = get_user_model().objects.create_user(username="journaluser", password="password123")
+        user = get_user_model().objects.create_user(username="journaluser", password="password123", is_staff=True)
         self.client.force_login(user)
 
         entry_date = self.start_date + timedelta(days=1)
@@ -226,7 +226,7 @@ class BatchWorkflowTests(TestCase):
         self.assertFalse(FeedConsumption.objects.filter(batch=self.batch, date=entry_date).exists())
 
     def test_prophylaxis_daily_program_range_duplicate_and_clear(self):
-        user = get_user_model().objects.create_user(username="proguser", password="password123")
+        user = get_user_model().objects.create_user(username="proguser", password="password123", is_staff=True)
         self.client.force_login(user)
 
         # 1. Access 45-day timetable view
@@ -274,7 +274,7 @@ class BatchWorkflowTests(TestCase):
         self.assertEqual(financials["direct_costs"], Decimal("300000.00"))
 
     def test_batch_create_and_edit_views(self):
-        user = get_user_model().objects.create_user(username="batchmgr", password="password123")
+        user = get_user_model().objects.create_user(username="batchmgr", password="password123", is_staff=True)
         self.client.force_login(user)
 
         # 1. Create a new batch
@@ -323,7 +323,7 @@ class BatchWorkflowTests(TestCase):
         self.assertContains(resp_expenses, "Poussins")
 
     def test_feed_purchase_creates_and_syncs_expense(self):
-        user = get_user_model().objects.create_user(username="stockmgr", password="password123")
+        user = get_user_model().objects.create_user(username="stockmgr", password="password123", is_staff=True)
         self.client.force_login(user)
 
         # 1. Add feed stock via form
@@ -384,6 +384,85 @@ class BatchWorkflowTests(TestCase):
         self.assertEqual(resp_del.status_code, 302)
         self.assertFalse(FeedInventory.objects.filter(pk=inventory.pk).exists())
         self.assertFalse(Expense.objects.filter(pk=expense.pk).exists())
+
+    def test_read_only_user_permissions(self):
+        # Visitor account: is_staff=False, is_superuser=False
+        readonly_user = get_user_model().objects.create_user(
+            username="readonly_visitor", password="user123!", is_staff=False, is_superuser=False
+        )
+        self.client.force_login(readonly_user)
+
+        # 1. Verification of read-only access on all consultation views (HTTP 200)
+        consult_urls = [
+            "/",
+            "/lots/",
+            "/journal/",
+            "/soins/",
+            "/depenses/",
+            "/stocks/",
+            "/ventes/",
+            "/prophylaxie/programme/",
+            f"/lots/{self.batch.pk}/bilan/",
+        ]
+        for url in consult_urls:
+            resp = self.client.get(url)
+            self.assertEqual(resp.status_code, 200, f"Expected 200 for {url}")
+
+        # 2. Blocked from mutations (redirected with warning, zero database changes)
+        # Attempt to create a batch
+        resp_batch = self.client.post("/lots/nouveau/", {
+            "name": "Lot Non Autorisé",
+            "start_date": timezone.localdate().isoformat(),
+            "target_duration_days": 45,
+            "ordered_quantity": 100,
+            "bonus_quantity": 0,
+            "unit_cost_chick": "500.00",
+        }, follow=True)
+        self.assertFalse(Batch.objects.filter(name="Lot Non Autorisé").exists())
+        self.assertContains(resp_batch, "Action non autorisée")
+
+        # Attempt daily entry
+        resp_daily = self.client.post("/journal/", {
+            "date": timezone.localdate().isoformat(),
+            "mortality_count": 10,
+            "cause_suspected": Mortality.Cause.DISEASE,
+        }, follow=True)
+        self.assertFalse(Mortality.objects.filter(count=10).exists())
+        self.assertContains(resp_daily, "Action non autorisée")
+
+        # Attempt close batch
+        self.client.post(f"/lots/{self.batch.pk}/cloturer/")
+        self.batch.refresh_from_db()
+        self.assertEqual(self.batch.status, Batch.Status.ACTIVE)
+
+        # Attempt feed stock purchase
+        self.client.post("/stocks/aliments/ajouter/", {
+            "batch": self.batch.pk,
+            "feed_type": FeedType.STARTER,
+            "purchase_date": timezone.localdate().isoformat(),
+            "bags_purchased": 5,
+            "bag_weight_kg": "50.00",
+            "unit_price": "20000.00",
+        })
+        self.assertFalse(FeedInventory.objects.filter(bags_purchased=5).exists())
+
+        # Attempt new expense
+        self.client.post("/depenses/nouvelle/", {
+            "designation": "Dépense interdite",
+            "amount": "15000.00",
+            "date": timezone.localdate().isoformat(),
+        })
+        self.assertFalse(Expense.objects.filter(designation="Dépense interdite").exists())
+
+        # Attempt new sale
+        self.client.post("/ventes/nouvelle/", {
+            "batch": self.batch.pk,
+            "date": timezone.localdate().isoformat(),
+            "quantity_sold": 20,
+            "unit_price": "3000.00",
+        })
+        self.assertFalse(Sale.objects.filter(quantity_sold=20).exists())
+
 
 
 

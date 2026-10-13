@@ -17,10 +17,12 @@
       <span>Statut : <strong>{{ batch.get_status_display }}</strong></span>
     </p>
   <div class="page-header-actions">
+    {% if user.is_staff %}
     <a class="btn-app-secondary" href="{% url 'batch-edit' batch.pk %}">
       <i class="bi bi-pencil"></i>
       <span>Modifier les paramètres</span>
     </a>
+    {% endif %}
     {% if batch.status == 'active' %}
     <a class="btn-app-secondary" href="{% url 'dashboard' %}">
       <i class="bi bi-arrow-left"></i>
@@ -182,11 +184,13 @@
   </form>
 </div>
 {% else %}
+{% if user.is_staff %}
 <div class="text-end">
   <a class="btn-app-primary" href="{% url 'batch-create' %}">
     <i class="bi bi-plus-lg"></i>
     <span>Lancer un nouveau lot</span>
   </a>
 </div>
+{% endif %}
 {% endif %}
 {% endblock %}

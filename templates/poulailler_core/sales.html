@@ -13,10 +13,12 @@
     </p>
   </div>
   <div class="page-header-actions">
+    {% if user.is_staff %}
     <a class="btn-app-primary" href="{% url 'sale-create' %}">
       <i class="bi bi-plus-circle-fill"></i>
       <span>Nouvelle vente</span>
     </a>
+    {% endif %}
   </div>
 </div>
 
@@ -165,10 +167,12 @@
     <i class="bi bi-cart-x fs-1 text-muted d-block mb-3"></i>
     <div class="fw-bold fs-5">Aucune vente enregistrée</div>
     <p class="small mb-4">Les sorties de volailles s'afficheront ici dès qu'une première vente sera enregistrée.</p>
+    {% if user.is_staff %}
     <a class="btn-app-primary d-inline-flex" href="{% url 'sale-create' %}">
       <i class="bi bi-plus-lg"></i>
       <span>Enregistrer une vente</span>
     </a>
+    {% endif %}
   </div>
   {% endif %}
 </div>

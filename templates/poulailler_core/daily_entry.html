@@ -53,8 +53,18 @@
 </div>
 
 <!-- Main Daily Form -->
+{% if not user.is_staff %}
+<div class="alert alert-info d-flex align-items-center gap-2 mb-4" role="alert">
+  <i class="bi bi-eye-fill fs-5"></i>
+  <div>
+    <strong>Mode consultation :</strong> Vous êtes connecté en mode lecture seule. Les modifications et enregistrements sont désactivés.
+  </div>
+</div>
+{% endif %}
+
 <form method="post" class="app-form-card mb-5">
   {% csrf_token %}
+  <fieldset {% if not user.is_staff %}disabled{% endif %}>
 
   {% if form.non_field_errors %}
   <div class="app-alert app-alert-danger mb-4">
@@ -173,22 +183,25 @@
   <!-- Form Actions -->
   <div class="d-flex align-items-center justify-content-between pt-3 border-top flex-wrap gap-2">
     <div class="d-flex align-items-center gap-3">
+      {% if user.is_staff %}
       <button class="btn-app-primary" type="submit">
         <i class="bi bi-check-circle-fill"></i>
         <span>{% if is_editing %}Mettre à jour cette saisie{% else %}Enregistrer la journée{% endif %}</span>
       </button>
+      {% endif %}
       <a class="btn-app-secondary" href="{% url 'dashboard' %}">
-        <span>Annuler</span>
+        <span>{% if user.is_staff %}Annuler{% else %}Retour au tableau de bord{% endif %}</span>
       </a>
     </div>
 
-    {% if is_editing %}
+    {% if is_editing and user.is_staff %}
     <a class="btn-app-danger small py-1 px-3" href="{% url 'daily-entry-delete' target_date|date:'Y-m-d' %}">
       <i class="bi bi-trash3"></i>
       <span>Supprimer cette saisie</span>
     </a>
     {% endif %}
   </div>
+  </fieldset>
 </form>
 
 <!-- Historical Daily Entries Table -->
@@ -258,12 +271,14 @@
             {% endif %}
           </td>
           <td class="text-end text-nowrap">
-            <a class="btn-app-secondary py-1 px-3 small me-1 d-inline-flex" href="?date={{ entry.date|date:'Y-m-d' }}" title="Modifier cette saisie">
-              <i class="bi bi-pencil-fill me-1"></i> Modifier
+            <a class="btn-app-secondary py-1 px-3 small me-1 d-inline-flex" href="?date={{ entry.date|date:'Y-m-d' }}" title="{% if user.is_staff %}Modifier cette saisie{% else %}Consulter cette date{% endif %}">
+              <i class="bi bi-{% if user.is_staff %}pencil-fill{% else %}eye{% endif %} me-1"></i> {% if user.is_staff %}Modifier{% else %}Consulter{% endif %}
             </a>
+            {% if user.is_staff %}
             <a class="btn-app-danger py-1 px-2 small d-inline-flex" href="{% url 'daily-entry-delete' entry.date|date:'Y-m-d' %}" title="Supprimer">
               <i class="bi bi-trash3"></i>
             </a>
+            {% endif %}
           </td>
         </tr>
         {% endfor %}

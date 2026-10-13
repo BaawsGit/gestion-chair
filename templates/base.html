@@ -83,14 +83,21 @@
       </ul>
 
       <div class="nav-actions">
+        {% if user.is_staff %}
         <a class="topnav-link d-none d-lg-inline-flex" href="{% url 'admin:index' %}" title="Administration Django" target="_blank">
           <i class="bi bi-sliders"></i>
           <span>Admin</span>
         </a>
+        {% endif %}
 
         <div class="user-badge">
           <span class="user-avatar">{{ user.username|slice:":1"|upper }}</span>
           <span class="d-none d-sm-inline">{{ user.username }}</span>
+          {% if user.is_staff %}
+            <span class="app-badge badge-success-soft py-0 px-2 ms-1" style="font-size: 0.7rem;">Admin</span>
+          {% else %}
+            <span class="app-badge badge-warning-soft py-0 px-2 ms-1" style="font-size: 0.7rem;"><i class="bi bi-eye me-1"></i>Lecture seule</span>
+          {% endif %}
         </div>
 
         <form method="post" action="{% url 'logout' %}" class="d-inline m-0">

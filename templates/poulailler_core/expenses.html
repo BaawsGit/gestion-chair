@@ -13,10 +13,12 @@
     </p>
   </div>
   <div class="page-header-actions">
+    {% if user.is_staff %}
     <a class="btn-app-primary" href="{% url 'expense-create' %}">
       <i class="bi bi-plus-circle-fill"></i>
       <span>Nouvelle dépense</span>
     </a>
+    {% endif %}
   </div>
 </div>
 
@@ -158,10 +160,12 @@
     <i class="bi bi-receipt fs-1 text-muted d-block mb-3"></i>
     <div class="fw-bold fs-5">Aucune dépense trouvée</div>
     <p class="small mb-4">Aucune écriture comptable ne correspond aux critères sélectionnés.</p>
+    {% if user.is_staff %}
     <a class="btn-app-primary d-inline-flex" href="{% url 'expense-create' %}">
       <i class="bi bi-plus-lg"></i>
       <span>Enregistrer une dépense</span>
     </a>
+    {% endif %}
   </div>
   {% endif %}
 </div>

@@ -43,7 +43,7 @@
       <span>Configurer le programme modèle (J1-J45)</span>
     </a>
 
-    {% if batch %}
+    {% if batch and user.is_staff %}
     <a class="btn-app-primary" href="{% url 'treatment-create' %}?batch={{ batch.pk }}">
       <i class="bi bi-plus-circle-fill"></i>
       <span>+ Ajouter un soin au lot</span>
@@ -63,7 +63,7 @@
     </a>
   </div>
 
-  {% if batch and program_count > 0 %}
+  {% if batch and program_count > 0 and user.is_staff %}
   <form method="post" action="{% url 'treatment-sync-batch' batch.pk %}" class="m-0">
     {% csrf_token %}
     <button type="submit" class="btn-app-secondary btn-sm" title="Synchronise ce lot avec les protocoles du programme modèle">
@@ -84,10 +84,12 @@
       Pour suivre un calendrier de soins au jour le jour, démarrez un nouveau lot. Vous pouvez également dès maintenant préparer votre programme de médicaments modèle (J1 à J45).
     </p>
     <div class="d-flex justify-content-center gap-3">
+      {% if user.is_staff %}
       <a class="btn-app-primary" href="{% url 'batch-create' %}">
         <i class="bi bi-plus-lg"></i>
         <span>Créer un lot</span>
       </a>
+      {% endif %}
       <a class="btn-app-secondary" href="{% url 'prophylaxis-program-list' %}">
         <i class="bi bi-shield-lock"></i>
         <span>Configurer le programme J1-J45</span>
@@ -126,7 +128,9 @@
           <th>Dosage</th>
           <th>Statut</th>
           <th class="text-center">Validation</th>
+          {% if user.is_staff %}
           <th class="text-end">Actions</th>
+          {% endif %}
         </tr>
       </thead>
       <tbody>
@@ -173,20 +177,25 @@
           </td>
           <td class="text-center">
             {% if not treatment.is_completed %}
-            <form method="post" action="{% url 'treatment-complete' treatment.pk %}" class="d-inline m-0">
-              {% csrf_token %}
-              <input type="hidden" name="next" value="{{ request.get_full_path }}">
-              <button class="btn-complete-treatment" type="submit">
-                <i class="bi bi-check2"></i>
-                <span>Valider</span>
-              </button>
-            </form>
+              {% if user.is_staff %}
+              <form method="post" action="{% url 'treatment-complete' treatment.pk %}" class="d-inline m-0">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                <button class="btn-complete-treatment" type="submit">
+                  <i class="bi bi-check2"></i>
+                  <span>Valider</span>
+                </button>
+              </form>
+              {% else %}
+                <span class="app-badge badge-warning-soft py-1 px-2">À faire</span>
+              {% endif %}
             {% else %}
               <span class="text-success small fw-bold">
                 <i class="bi bi-check-all fs-5"></i>
               </span>
             {% endif %}
           </td>
+          {% if user.is_staff %}
           <td class="text-end text-nowrap">
             <a class="btn-app-secondary py-1 px-2 small me-1 d-inline-flex" href="{% url 'treatment-edit' treatment.pk %}" title="Modifier ce soin">
               <i class="bi bi-pencil"></i>
@@ -195,6 +204,7 @@
               <i class="bi bi-trash3"></i>
             </a>
           </td>
+          {% endif %}
         </tr>
         {% endfor %}
       </tbody>
@@ -208,10 +218,12 @@
       Vous pouvez ajouter des soins personnalisés à n'importe quel jour (J1 à J45) ou appliquer le programme de prophylaxie de référence.
     </p>
     <div class="d-flex justify-content-center gap-3">
+      {% if user.is_staff %}
       <a class="btn-app-primary" href="{% url 'treatment-create' %}?batch={{ batch.pk }}">
         <i class="bi bi-plus-lg"></i>
         <span>Ajouter un soin à ce lot</span>
       </a>
+      {% endif %}
       <a class="btn-app-secondary" href="{% url 'prophylaxis-program-list' %}">
         <i class="bi bi-shield-lock"></i>
         <span>Configurer le programme J1-J45</span>

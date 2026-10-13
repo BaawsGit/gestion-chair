@@ -19,6 +19,8 @@ def run_migrations_view(request):
     buf = io.StringIO()
     try:
         call_command("migrate", interactive=False, stdout=buf)
+        from poulailler_core.auth_setup import ensure_default_accounts
+        ensure_default_accounts()
         sync_all_feed_expenses()
         output = buf.getvalue()
         return HttpResponse(

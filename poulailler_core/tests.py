@@ -322,5 +322,69 @@ class BatchWorkflowTests(TestCase):
         self.assertContains(resp_expenses, "350000")
         self.assertContains(resp_expenses, "Poussins")
 
+    def test_feed_purchase_creates_and_syncs_expense(self):
+        user = get_user_model().objects.create_user(username="stockmgr", password="password123")
+        self.client.force_login(user)
+
+        # 1. Add feed stock via form
+        post_data = {
+            "batch": self.batch.pk,
+            "feed_type": FeedType.STARTER,
+            "purchase_date": timezone.localdate().isoformat(),
+            "bags_purchased": 4,
+            "bag_weight_kg": "50.00",
+            "unit_price": "22500.00",
+            "supplier": "Provendeur Central",
+            "notes": "4 sacs démarrage",
+        }
+        resp = self.client.post("/stocks/aliments/ajouter/", post_data)
+        self.assertEqual(resp.status_code, 302)
+
+        # 2. Verify FeedInventory was created
+        inventory = FeedInventory.objects.get(supplier="Provendeur Central")
+        self.assertEqual(inventory.bags_purchased, 4)
+        self.assertEqual(inventory.total_cost, Decimal("90000.00"))
+        self.assertIsNotNone(inventory.expense)
+
+        # 3. Verify Expense was automatically created
+        expense = inventory.expense
+        self.assertEqual(expense.amount, Decimal("90000.00"))
+        self.assertEqual(expense.category.name, "Aliment")
+        self.assertEqual(expense.batch, self.batch)
+
+        # 4. Verify Expense appears in Dépenses view
+        resp_exp = self.client.get("/depenses/")
+        self.assertEqual(resp_exp.status_code, 200)
+        self.assertContains(resp_exp, "90000")
+        self.assertContains(resp_exp, "Aliment")
+
+        # 5. Verify Stocks view displays purchase with linked expense
+        resp_stocks = self.client.get("/stocks/")
+        self.assertEqual(resp_stocks.status_code, 200)
+        self.assertContains(resp_stocks, "90000")
+        self.assertContains(resp_stocks, "Liée")
+
+        # 6. Verify Dashboard displays this expense in direct costs
+        resp_dash = self.client.get("/")
+        self.assertEqual(resp_dash.status_code, 200)
+        self.assertContains(resp_dash, "Aliment")
+
+        # 7. Edit the feed purchase
+        edit_data = post_data.copy()
+        edit_data["bags_purchased"] = 6  # 6 * 22500 = 135000
+        resp_edit = self.client.post(f"/stocks/aliments/{inventory.pk}/modifier/", edit_data)
+        self.assertEqual(resp_edit.status_code, 302)
+        inventory.refresh_from_db()
+        self.assertEqual(inventory.bags_purchased, 6)
+        expense.refresh_from_db()
+        self.assertEqual(expense.amount, Decimal("135000.00"))
+
+        # 8. Delete the feed purchase
+        resp_del = self.client.post(f"/stocks/aliments/{inventory.pk}/supprimer/")
+        self.assertEqual(resp_del.status_code, 302)
+        self.assertFalse(FeedInventory.objects.filter(pk=inventory.pk).exists())
+        self.assertFalse(Expense.objects.filter(pk=expense.pk).exists())
+
+
 
 

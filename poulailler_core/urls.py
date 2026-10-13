@@ -29,4 +29,6 @@ urlpatterns = [
     path("ventes/nouvelle/", views.sale_create, name="sale-create"),
     path("stocks/", views.feed_stock_view, name="feed-stock"),
     path("stocks/aliments/ajouter/", views.feed_purchase, name="feed-purchase"),
+    path("stocks/aliments/<int:pk>/modifier/", views.feed_purchase_edit, name="feed-purchase-edit"),
+    path("stocks/aliments/<int:pk>/supprimer/", views.feed_purchase_delete, name="feed-purchase-delete"),
 ]

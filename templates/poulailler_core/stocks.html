@@ -83,22 +83,53 @@
           <thead>
             <tr>
               <th>Date</th>
-              <th>Aliment</th>
+              <th>Aliment / Lot</th>
               <th>Sacs</th>
-              <th>Poids/Sac</th>
-              <th>Prix unitaire</th>
-              <th>Fournisseur</th>
+              <th class="text-end">Montant</th>
+              <th>Dépense</th>
+              <th class="text-end">Actions</th>
             </tr>
           </thead>
           <tbody>
             {% for p in purchases %}
             <tr>
-              <td class="text-nowrap">{{ p.purchase_date|date:'d/m/Y' }}</td>
-              <td class="fw-bold text-dark">{{ p.get_feed_type_display }}</td>
-              <td class="fw-bold text-success">{{ p.bags_purchased }}</td>
-              <td>{{ p.bag_weight_kg|floatformat:0 }} kg</td>
-              <td>{{ p.unit_price|floatformat:0 }} FCFA</td>
-              <td class="text-muted small">{{ p.supplier|default:'—' }}</td>
+              <td class="text-nowrap small">{{ p.purchase_date|date:'d/m/Y' }}</td>
+              <td>
+                <div class="fw-bold text-dark">{{ p.get_feed_type_display }}</div>
+                <div class="small text-muted">
+                  {% if p.batch %}
+                    <i class="bi bi-layers text-success"></i> {{ p.batch.name }}
+                  {% else %}
+                    <i class="bi bi-house"></i> Stock ferme
+                  {% endif %}
+                  {% if p.supplier %} • {{ p.supplier }}{% endif %}
+                </div>
+              </td>
+              <td>
+                <span class="fw-bold text-success">{{ p.bags_purchased }} sac{{ p.bags_purchased|pluralize }}</span>
+                <span class="text-muted small d-block">{{ p.bag_weight_kg|floatformat:0 }} kg/sac</span>
+              </td>
+              <td class="text-end text-nowrap">
+                <span class="fw-bold text-dark">{{ p.total_cost|floatformat:0 }}</span>
+                <small class="text-muted d-block">{{ p.unit_price|floatformat:0 }} F/sac</small>
+              </td>
+              <td class="text-nowrap">
+                {% if p.expense %}
+                  <a href="{% url 'expense-list' %}?batch={{ p.batch_id|default:'' }}" class="app-badge badge-success-soft text-decoration-none" title="Dépense liée et comptabilisée">
+                    <i class="bi bi-wallet2 me-1"></i> Liée
+                  </a>
+                {% else %}
+                  <span class="app-badge badge-warning-soft">Non liée</span>
+                {% endif %}
+              </td>
+              <td class="text-end text-nowrap">
+                <a href="{% url 'feed-purchase-edit' p.pk %}" class="btn btn-sm btn-outline-secondary py-0 px-2 me-1" title="Modifier cette réception">
+                  <i class="bi bi-pencil"></i>
+                </a>
+                <a href="{% url 'feed-purchase-delete' p.pk %}" class="btn btn-sm btn-outline-danger py-0 px-2" title="Supprimer">
+                  <i class="bi bi-trash"></i>
+                </a>
+              </td>
             </tr>
             {% endfor %}
           </tbody>

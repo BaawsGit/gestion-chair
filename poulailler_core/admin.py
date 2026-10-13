@@ -64,9 +64,9 @@ class MortalityAdmin(admin.ModelAdmin):
 
 @admin.register(FeedInventory)
 class FeedInventoryAdmin(admin.ModelAdmin):
-    list_display = ("purchase_date", "feed_type", "bags_purchased", "bag_weight_kg", "unit_price", "supplier")
-    list_filter = ("feed_type", "purchase_date")
-    search_fields = ("supplier", "notes")
+    list_display = ("purchase_date", "batch", "feed_type", "bags_purchased", "bag_weight_kg", "unit_price", "total_cost", "expense", "supplier")
+    list_filter = ("batch", "feed_type", "purchase_date")
+    search_fields = ("supplier", "notes", "batch__name")
 
 
 @admin.register(FeedConsumption)

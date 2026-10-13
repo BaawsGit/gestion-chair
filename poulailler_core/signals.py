@@ -1,9 +1,9 @@
 from datetime import timedelta
 
-from django.db.models.signals import post_save
+from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
 
-from .models import Batch, ProphylaxisProgram, TreatmentLog
+from .models import Batch, FeedInventory, ProphylaxisProgram, TreatmentLog
 
 
 def sync_batch_treatments(batch):
@@ -56,3 +56,26 @@ def update_active_batch_schedules(sender, instance, **kwargs):
     if instance.is_active:
         for batch in Batch.objects.filter(status=Batch.Status.ACTIVE).iterator():
             sync_batch_treatments(batch)
+
+
+@receiver(post_save, sender=FeedInventory)
+def sync_feed_inventory_on_save(sender, instance, **kwargs):
+    if getattr(instance, "_skip_sync_signal", False):
+        return
+    from .finance import sync_feed_inventory_expense
+    instance._skip_sync_signal = True
+    try:
+        sync_feed_inventory_expense(instance)
+    finally:
+        instance._skip_sync_signal = False
+
+
+@receiver(post_delete, sender=FeedInventory)
+def delete_feed_inventory_expense_on_delete(sender, instance, **kwargs):
+    if instance.expense_id:
+        from .models import Expense
+        try:
+            Expense.objects.filter(pk=instance.expense_id).delete()
+        except Exception:
+            pass
+

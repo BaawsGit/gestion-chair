@@ -91,3 +91,72 @@ def sync_batch_chick_expense(batch):
             amount=chick_cost,
         )
     return chick_expense
+
+
+def sync_feed_inventory_expense(inventory):
+    """
+    Ensure a corresponding Expense is recorded with category 'Aliment'
+    so that feed purchases appear in Dépenses, Dashboard, and batch financials.
+    """
+    from .models import Batch, Expense, ExpenseCategory, FeedInventory
+
+    cat_feed = ExpenseCategory.objects.filter(name__iexact="Aliment").first()
+    if not cat_feed:
+        cat_feed = ExpenseCategory.objects.filter(name__icontains="aliment").first()
+    if not cat_feed:
+        cat_feed = ExpenseCategory.objects.create(
+            name="Aliment",
+            is_investment=False,
+            useful_life_months=1,
+        )
+
+    if not inventory.batch_id:
+        active_batch = Batch.objects.filter(status=Batch.Status.ACTIVE).first()
+        if active_batch:
+            inventory.batch = active_batch
+            FeedInventory.objects.filter(pk=inventory.pk).update(batch=active_batch)
+
+    total_amount = (Decimal(inventory.bags_purchased) * inventory.unit_price).quantize(CENT)
+    designation = f"Achat aliment {inventory.get_feed_type_display()} ({inventory.bags_purchased} sacs de {inventory.bag_weight_kg:.0f} kg)"
+    if inventory.supplier:
+        designation += f" - {inventory.supplier}"
+
+    if inventory.expense_id:
+        try:
+            expense = Expense.objects.get(pk=inventory.expense_id)
+            expense.batch = inventory.batch
+            expense.category = cat_feed
+            expense.date = inventory.purchase_date
+            expense.designation = designation
+            expense.amount = total_amount
+            expense.save(update_fields=["batch", "category", "date", "designation", "amount"])
+            return expense
+        except Expense.DoesNotExist:
+            inventory.expense = None
+
+    expense = Expense.objects.create(
+        batch=inventory.batch,
+        category=cat_feed,
+        date=inventory.purchase_date,
+        designation=designation,
+        amount=total_amount,
+    )
+    FeedInventory.objects.filter(pk=inventory.pk).update(expense=expense)
+    inventory.expense = expense
+    return expense
+
+
+def sync_all_feed_expenses():
+    """
+    Ensure all FeedInventory records have their associated Expense synchronized.
+    """
+    from .models import Batch, FeedInventory
+
+    active_batch = Batch.objects.filter(status=Batch.Status.ACTIVE).first()
+    for inv in FeedInventory.objects.select_related("expense", "batch"):
+        if not inv.expense_id:
+            if not inv.batch_id and active_batch:
+                inv.batch = active_batch
+                FeedInventory.objects.filter(pk=inv.pk).update(batch=active_batch)
+            sync_feed_inventory_expense(inv)
+

@@ -174,6 +174,15 @@ class FeedType(models.TextChoices):
 
 
 class FeedInventory(models.Model):
+    batch = models.ForeignKey(
+        Batch, verbose_name="lot", related_name="feed_inventories",
+        null=True, blank=True, on_delete=models.SET_NULL,
+        help_text="Lot concerné (laisser vide pour les charges fixes / stock général de la ferme)."
+    )
+    expense = models.OneToOneField(
+        Expense, verbose_name="dépense associée", related_name="feed_inventory",
+        null=True, blank=True, on_delete=models.SET_NULL
+    )
     feed_type = models.CharField("type d'aliment", max_length=10, choices=FeedType.choices)
     purchase_date = models.DateField("date d'achat")
     bags_purchased = models.PositiveIntegerField("sacs achetés", validators=[MinValueValidator(1)])
@@ -187,6 +196,10 @@ class FeedInventory(models.Model):
     )
     supplier = models.CharField("fournisseur", max_length=120, blank=True)
     notes = models.TextField("notes", blank=True)
+
+    @property
+    def total_cost(self):
+        return (Decimal(self.bags_purchased) * self.unit_price).quantize(Decimal("0.01"))
 
     class Meta:
         ordering = ["-purchase_date", "feed_type"]

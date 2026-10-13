@@ -105,7 +105,14 @@
         {% for expense in expenses %}
         <tr>
           <td class="text-nowrap">{{ expense.date|date:'d/m/Y' }}</td>
-          <td class="fw-bold text-dark">{{ expense.designation }}</td>
+          <td class="fw-bold text-dark">
+            {{ expense.designation }}
+            {% if expense.feed_inventory %}
+              <a href="{% url 'feed-stock' %}" class="app-badge badge-success-soft text-decoration-none ms-1" title="Entrée de stock aliment">
+                <i class="bi bi-box-seam me-1"></i> Stock
+              </a>
+            {% endif %}
+          </td>
           <td>
             {% if expense.category.is_investment %}
               <span class="app-badge badge-info-soft" title="Amorti sur {{ expense.category.useful_life_months }} mois">

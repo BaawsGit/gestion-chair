@@ -9,7 +9,12 @@ from django.http import HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 
-from .finance import batch_financials, sync_batch_chick_expense
+from .finance import (
+    batch_financials,
+    sync_all_feed_expenses,
+    sync_batch_chick_expense,
+    sync_feed_inventory_expense,
+)
 from .forms import (
     BatchForm,
     DailyEventForm,
@@ -54,6 +59,7 @@ def dashboard(request):
 
     if batch.chick_cost > 0 and not Expense.objects.filter(batch=batch, category__name__iexact="Poussins").exists():
         sync_batch_chick_expense(batch)
+    sync_all_feed_expenses()
 
     financials = batch_financials(batch)
     due_treatments = batch.treatments.filter(
@@ -608,6 +614,7 @@ def expense_list(request):
     for b in batches:
         if b.chick_cost > 0 and not Expense.objects.filter(batch=b, category__name__iexact="Poussins").exists():
             sync_batch_chick_expense(b)
+    sync_all_feed_expenses()
 
     categories = ExpenseCategory.objects.all()
     batch_id = request.GET.get("batch")
@@ -645,8 +652,9 @@ def expense_create(request):
 
 @login_required
 def feed_stock_view(request):
+    sync_all_feed_expenses()
     summary = FeedInventory.stock_summary()
-    purchases = FeedInventory.objects.order_by("-purchase_date", "-pk")[:25]
+    purchases = FeedInventory.objects.select_related("batch", "expense").order_by("-purchase_date", "-pk")[:25]
     consumptions = FeedConsumption.objects.select_related("batch").order_by("-date", "-pk")[:25]
     return render(request, "poulailler_core/stocks.html", {
         "feed_stock": summary,
@@ -659,10 +667,45 @@ def feed_stock_view(request):
 def feed_purchase(request):
     form = FeedInventoryForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
-        form.save()
-        messages.success(request, "Entrée de stock enregistrée. N'oubliez pas d'enregistrer la dépense correspondante si besoin.")
+        inventory = form.save()
+        sync_feed_inventory_expense(inventory)
+        total_fcfa = inventory.total_cost
+        messages.success(request, f"Réception de stock enregistrée et dépense de {total_fcfa:,.0f} FCFA comptabilisée avec succès.")
         return redirect("feed-stock")
-    return render(request, "poulailler_core/form_page.html", {"form": form, "title": "Réception d'aliment", "submit_label": "Ajouter au stock"})
+    return render(request, "poulailler_core/form_page.html", {"form": form, "title": "Réception d'aliment", "submit_label": "Ajouter au stock et comptabiliser"})
+
+
+@login_required
+def feed_purchase_edit(request, pk):
+    inventory = get_object_or_404(FeedInventory, pk=pk)
+    form = FeedInventoryForm(request.POST or None, instance=inventory)
+    if request.method == "POST" and form.is_valid():
+        inventory = form.save()
+        sync_feed_inventory_expense(inventory)
+        messages.success(request, f"Réception d'aliment et dépense associées mises à jour ({inventory.total_cost:,.0f} FCFA).")
+        return redirect("feed-stock")
+    return render(request, "poulailler_core/form_page.html", {
+        "form": form,
+        "title": "Modifier la réception d'aliment",
+        "submit_label": "Mettre à jour",
+    })
+
+
+@login_required
+def feed_purchase_delete(request, pk):
+    inventory = get_object_or_404(FeedInventory, pk=pk)
+    if request.method == "POST":
+        expense = inventory.expense
+        inventory.delete()
+        if expense:
+            expense.delete()
+        messages.success(request, "Réception de stock et dépense associée supprimées.")
+        return redirect("feed-stock")
+    return render(request, "poulailler_core/confirm_delete.html", {
+        "title": "Supprimer la réception d'aliment",
+        "object_name": f"{inventory.get_feed_type_display()} du {inventory.purchase_date} ({inventory.bags_purchased} sacs - {inventory.total_cost:,.0f} FCFA)",
+        "cancel_url": "/stocks/",
+    })
 
 
 @login_required

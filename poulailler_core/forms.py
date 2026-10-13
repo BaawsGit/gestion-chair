@@ -84,8 +84,18 @@ class ExpenseForm(StyledModelForm):
 class FeedInventoryForm(StyledModelForm):
     class Meta:
         model = FeedInventory
-        fields = ["feed_type", "purchase_date", "bags_purchased", "bag_weight_kg", "unit_price", "supplier", "notes"]
+        fields = ["batch", "feed_type", "purchase_date", "bags_purchased", "bag_weight_kg", "unit_price", "supplier", "notes"]
         widgets = {"purchase_date": forms.DateInput(attrs={"type": "date"})}
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if "batch" in self.fields:
+            self.fields["batch"].empty_label = "Ferme générale (sans lot spécifique)"
+            if not self.instance.pk and "initial" not in kwargs:
+                from .models import Batch
+                active_batch = Batch.objects.filter(status=Batch.Status.ACTIVE).first()
+                if active_batch:
+                    self.fields["batch"].initial = active_batch
 
 
 class SaleForm(StyledModelForm):

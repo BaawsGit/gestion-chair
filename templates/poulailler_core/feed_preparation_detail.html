@@ -18,6 +18,10 @@
       <span>Toutes les fabrications</span>
     </a>
     {% if user.is_staff %}
+    <a class="btn-app-secondary" href="{% url 'feed-preparation-edit' prep.pk %}">
+      <i class="bi bi-pencil-square"></i>
+      <span>Modifier</span>
+    </a>
     <a class="btn-app-danger" href="{% url 'feed-preparation-delete' prep.pk %}">
       <i class="bi bi-trash"></i>
       <span>Supprimer</span>

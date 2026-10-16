@@ -5,17 +5,21 @@
 <div class="page-header">
   <div class="page-header-info">
     <div class="d-flex align-items-center gap-2">
-      <span class="page-tag"><i class="bi bi-play-circle text-success"></i> SESSION DE FABRICATION</span>
+      <span class="page-tag"><i class="bi bi-play-circle text-success"></i> {% if prep %}MODIFICATION DE FABRICATION{% else %}SESSION DE FABRICATION{% endif %}</span>
     </div>
     <h1 class="page-title">{{ title }}</h1>
     <p class="page-subtitle">
+      {% if prep %}
+      Modifiez les matières premières utilisées, les quantités et décaissements réels. Vos stocks d'aliment et la dépense associée seront mis à jour instantanément.
+      {% else %}
       Renseignez les matières premières utilisées. Pour chaque additif ou ingrédient, indiquez s'il a été acheté aujourd'hui (décaissement réel) ou pris sur le reliquat d'une précédente préparation (0 FCFA).
+      {% endif %}
     </p>
   </div>
   <div class="page-header-actions">
-    <a class="btn-app-secondary" href="{% url 'feed-formula-list' %}">
+    <a class="btn-app-secondary" href="{% if prep %}{% url 'feed-preparation-detail' prep.pk %}{% else %}{% url 'feed-formula-list' %}{% endif %}">
       <i class="bi bi-arrow-left"></i>
-      <span>Retour aux formules</span>
+      <span>{% if prep %}Retour à la fiche{% else %}Retour aux formules{% endif %}</span>
     </a>
   </div>
 </div>
@@ -202,9 +206,9 @@
   <div class="d-flex align-items-center gap-3 pt-3 border-top">
     <button class="btn-app-primary fs-6 py-2 px-4 shadow" type="submit">
       <i class="bi bi-check2-circle fs-5"></i>
-      <span>Enregistrer & Synchroniser le stock</span>
+      <span>{% if prep %}Mettre à jour la fabrication{% else %}Enregistrer & Synchroniser le stock{% endif %}</span>
     </button>
-    <a class="btn-app-secondary" href="{% url 'feed-formula-list' %}">
+    <a class="btn-app-secondary" href="{% if prep %}{% url 'feed-preparation-detail' prep.pk %}{% else %}{% url 'feed-formula-list' %}{% endif %}">
       <span>Annuler</span>
     </a>
   </div>
@@ -213,8 +217,9 @@
 
 {% block scripts %}
 <script>
-  // Formula data provided by Django view
+  // Formula data and existing items provided by Django view
   const FORMULAS_DATA = {{ formulas_json|safe }};
+  const EXISTING_ITEMS_DATA = {{ existing_items_json|safe }};
 
   document.addEventListener('DOMContentLoaded', function () {
     const formulaSelect = document.getElementById('id_prep_formula');
@@ -431,14 +436,34 @@
       calculateLive();
     }
 
+    let currentFormulaVal = formulaSelect ? formulaSelect.value : null;
+
+    if (EXISTING_ITEMS_DATA && Array.isArray(EXISTING_ITEMS_DATA) && EXISTING_ITEMS_DATA.length > 0) {
+      itemsBody.innerHTML = '';
+      EXISTING_ITEMS_DATA.forEach(item => {
+        itemsBody.appendChild(createRow(item.name, item.qty, item.unit, item.cost, item.is_purchased, item.desc || ''));
+      });
+      calculateLive();
+    } else {
+      if (formulaSelect) {
+        loadFormulaItems(formulaSelect.value);
+      } else {
+        loadFormulaItems(null);
+      }
+    }
+
     if (formulaSelect) {
       formulaSelect.addEventListener('change', function () {
+        if (EXISTING_ITEMS_DATA && Array.isArray(EXISTING_ITEMS_DATA) && EXISTING_ITEMS_DATA.length > 0) {
+          const proceed = confirm("Attention : charger une nouvelle formule remplacera les ingrédients actuellement renseignés. Voulez-vous continuer ?");
+          if (!proceed) {
+            this.value = currentFormulaVal;
+            return;
+          }
+        }
+        currentFormulaVal = this.value;
         loadFormulaItems(this.value);
       });
-      // Initial load
-      loadFormulaItems(formulaSelect.value);
-    } else {
-      loadFormulaItems(null);
     }
 
     if (addBtn) {

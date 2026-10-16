@@ -283,6 +283,9 @@
                 <i class="bi bi-eye"></i>
               </a>
               {% if user.is_staff %}
+              <a class="btn btn-sm btn-outline-primary" href="{% url 'feed-preparation-edit' p.pk %}" title="Modifier">
+                <i class="bi bi-pencil"></i>
+              </a>
               <a class="btn btn-sm btn-outline-danger" href="{% url 'feed-preparation-delete' p.pk %}" title="Supprimer">
                 <i class="bi bi-trash"></i>
               </a>

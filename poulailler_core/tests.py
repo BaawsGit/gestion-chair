@@ -11,6 +11,7 @@ from .finance import batch_financials
 from .models import (
     Batch,
     Expense,
+    ExpenseCategory,
     FeedConsumption,
     FeedFormula,
     FeedFormulaItem,
@@ -730,6 +731,99 @@ class FeedFormulationAndPreparationTests(TestCase):
         self.assertFalse(FeedPreparation.objects.filter(pk=prep_pk).exists())
         self.assertFalse(Expense.objects.filter(pk=exp_pk).exists())
         self.assertFalse(FeedInventory.objects.filter(pk=inv_pk).exists())
+
+    def test_feed_preparation_edit_and_synchronization(self):
+        # 1. Create initial preparation
+        prep = FeedPreparation.objects.create(
+            batch=self.batch,
+            formula=self.formula,
+            feed_type=FeedType.GROWER,
+            date=timezone.localdate(),
+            total_produced_kg=Decimal("300.00"),
+            milling_cost=Decimal("1500.00"),
+            commercial_bag_reference_price=Decimal("18000.00"),
+            total_cost=Decimal("73500.00"),
+        )
+        FeedPreparationItem.objects.create(
+            preparation=prep,
+            ingredient_name="Maïs",
+            recipe_quantity=Decimal("180.00"),
+            recipe_unit="kg",
+            purchased_today=True,
+            purchase_cost=Decimal("36000.00"),
+            order=1,
+        )
+        cat_feed, _ = ExpenseCategory.objects.get_or_create(name="Aliment")
+        expense = Expense.objects.create(
+            batch=self.batch,
+            category=cat_feed,
+            date=prep.date,
+            designation="Fabrication provende",
+            amount=Decimal("73500.00"),
+        )
+        feed_inv = FeedInventory.objects.create(
+            batch=self.batch,
+            expense=expense,
+            feed_type=FeedType.GROWER,
+            purchase_mode=FeedInventory.PurchaseMode.RETAIL,
+            purchase_date=prep.date,
+            quantity_kg=Decimal("300.00"),
+            unit_price=Decimal("245.00"),
+        )
+        prep.expense = expense
+        prep.feed_inventory = feed_inv
+        prep.save()
+
+        # 2. GET the edit page
+        resp_get = self.client.get(f"/provende/preparations/{prep.pk}/modifier/")
+        self.assertEqual(resp_get.status_code, 200)
+        self.assertContains(resp_get, "Modifier la fabrication")
+        self.assertContains(resp_get, "Maïs")
+
+        # 3. POST modification: change quantity to 400 kg, milling cost to 2000, modify ingredients
+        edit_data = {
+            "batch": self.batch.pk,
+            "formula": self.formula.pk,
+            "feed_type": FeedType.FINISHER,
+            "date": timezone.localdate().isoformat(),
+            "total_produced_kg": "400.00",
+            "milling_cost": "2000.00",
+            "commercial_bag_reference_price": "18500.00",
+            "notes": "Session modifiée avec succès",
+            "item_name[]": ["Maïs broyé", "Concentré chair"],
+            "item_recipe_qty[]": ["250", "150"],
+            "item_recipe_unit[]": ["kg", "kg"],
+            "item_purchased[]": ["1", "1"],
+            "item_desc[]": ["5 sacs", "3 sacs"],
+            "item_cost[]": ["50000", "40000"],
+        }
+        resp_post = self.client.post(f"/provende/preparations/{prep.pk}/modifier/", edit_data)
+        self.assertEqual(resp_post.status_code, 302)
+
+        prep.refresh_from_db()
+        # New cost = 50000 + 40000 + 2000 = 92000 FCFA
+        self.assertEqual(prep.total_cost, Decimal("92000.00"))
+        self.assertEqual(prep.total_produced_kg, Decimal("400.00"))
+        self.assertEqual(prep.feed_type, FeedType.FINISHER)
+        self.assertEqual(prep.notes, "Session modifiée avec succès")
+        self.assertEqual(prep.items.count(), 2)
+
+        # Verify linked expense was updated
+        expense.refresh_from_db()
+        self.assertEqual(expense.amount, Decimal("92000.00"))
+        self.assertIn("Finition", expense.designation)
+        self.assertIn("400 kg", expense.designation)
+
+        # Verify linked inventory was updated
+        feed_inv.refresh_from_db()
+        self.assertEqual(feed_inv.quantity_kg, Decimal("400.00"))
+        self.assertEqual(feed_inv.feed_type, FeedType.FINISHER)
+        self.assertEqual(feed_inv.unit_price, Decimal("230.00"))
+
+        # Verify stock purchase edit redirects directly to preparation edit
+        resp_stock_edit = self.client.get(f"/stocks/aliments/{feed_inv.pk}/modifier/")
+        self.assertRedirects(resp_stock_edit, f"/provende/preparations/{prep.pk}/modifier/")
+
 
 
 

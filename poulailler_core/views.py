@@ -882,6 +882,8 @@ def feed_purchase(request):
 @admin_required
 def feed_purchase_edit(request, pk):
     inventory = get_object_or_404(FeedInventory, pk=pk)
+    if hasattr(inventory, "feed_preparation") and inventory.feed_preparation:
+        return redirect("feed-preparation-edit", pk=inventory.feed_preparation.pk)
     form = FeedInventoryForm(request.POST or None, instance=inventory)
     if request.method == "POST" and form.is_valid():
         inventory = form.save()
@@ -1143,6 +1145,152 @@ def feed_formula_delete(request, pk):
     })
 
 
+def _get_formulas_dict():
+    formulas_qs = FeedFormula.objects.filter(is_active=True).prefetch_related("items")
+    formulas_dict = {}
+    for f in formulas_qs:
+        formulas_dict[str(f.pk)] = {
+            "id": f.pk,
+            "name": f.name,
+            "feed_type": f.feed_type,
+            "target_total_kg": float(f.target_total_kg),
+            "commercial_bag_reference_price": float(f.commercial_bag_reference_price),
+            "items": [
+                {
+                    "name": item.ingredient_name,
+                    "quantity": float(item.quantity),
+                    "unit": item.unit,
+                    "default_unit_cost": float(item.default_unit_cost),
+                }
+                for item in f.items.all()
+            ]
+        }
+    return formulas_dict
+
+
+def _extract_and_save_preparation_items(prep, request):
+    milling_cost = prep.milling_cost or Decimal("0.00")
+
+    names = request.POST.getlist("item_name[]")
+    recipe_qtys = request.POST.getlist("item_recipe_qty[]")
+    recipe_units = request.POST.getlist("item_recipe_unit[]")
+    purchased_flags = request.POST.getlist("item_purchased[]")
+    descriptions = request.POST.getlist("item_desc[]")
+    costs = request.POST.getlist("item_cost[]")
+
+    items_to_create = []
+    total_items_cost = Decimal("0.00")
+
+    for idx, name in enumerate(names):
+        clean_name = (name or "").strip()
+        if not clean_name:
+            continue
+
+        qty_str = recipe_qtys[idx] if idx < len(recipe_qtys) else "0"
+        unit = recipe_units[idx] if idx < len(recipe_units) else "kg"
+        desc = descriptions[idx] if idx < len(descriptions) else ""
+        cost_str = costs[idx] if idx < len(costs) else "0"
+
+        is_purchased = True
+        if idx < len(purchased_flags):
+            is_purchased = purchased_flags[idx] in ("1", "true", "True", "on")
+
+        try:
+            recipe_qty = Decimal(qty_str.replace(",", ".")) if qty_str else Decimal("0.00")
+        except Exception:
+            recipe_qty = Decimal("0.00")
+
+        try:
+            purchase_cost = Decimal(cost_str.replace(",", ".")) if (is_purchased and cost_str) else Decimal("0.00")
+        except Exception:
+            purchase_cost = Decimal("0.00")
+
+        if not is_purchased:
+            purchase_cost = Decimal("0.00")
+
+        total_items_cost += purchase_cost
+
+        items_to_create.append({
+            "ingredient_name": clean_name,
+            "recipe_quantity": recipe_qty,
+            "recipe_unit": unit.strip() or "kg",
+            "purchased_today": is_purchased,
+            "purchased_description": desc.strip(),
+            "purchase_cost": purchase_cost,
+            "order": idx + 1,
+        })
+
+    total_spent = total_items_cost + milling_cost
+    prep.total_cost = total_spent
+
+    with transaction.atomic():
+        prep.save()
+
+        prep.items.all().delete()
+        for item_data in items_to_create:
+            FeedPreparationItem.objects.create(
+                preparation=prep,
+                **item_data
+            )
+
+        cat_feed, _ = ExpenseCategory.objects.get_or_create(
+            name="Aliment",
+            defaults={"is_investment": False, "useful_life_months": 1}
+        )
+        formula_label = prep.formula.name if prep.formula else "Provende maison"
+        expense_designation = f"Fabrication provende {prep.get_feed_type_display()} · {prep.total_produced_kg:,.0f} kg ({formula_label})"
+
+        expense = prep.expense
+        if expense:
+            expense.batch = prep.batch
+            expense.category = cat_feed
+            expense.date = prep.date
+            expense.designation = expense_designation
+            expense.amount = prep.total_cost if prep.total_cost > 0 else Decimal("0.01")
+            expense.save()
+        else:
+            expense = Expense.objects.create(
+                batch=prep.batch,
+                category=cat_feed,
+                date=prep.date,
+                designation=expense_designation,
+                amount=prep.total_cost if prep.total_cost > 0 else Decimal("0.01"),
+            )
+            prep.expense = expense
+
+        unit_price_calc = (prep.total_cost / prep.total_produced_kg).quantize(Decimal("0.01")) if prep.total_produced_kg > 0 else Decimal("0.01")
+        feed_inv = prep.feed_inventory
+        if feed_inv:
+            feed_inv.batch = prep.batch
+            feed_inv.expense = expense
+            feed_inv.feed_type = prep.feed_type
+            feed_inv.purchase_mode = FeedInventory.PurchaseMode.RETAIL
+            feed_inv.purchase_date = prep.date
+            feed_inv.quantity_kg = prep.total_produced_kg
+            feed_inv.unit_price = unit_price_calc if unit_price_calc > 0 else Decimal("0.01")
+            feed_inv.supplier = "Provenderie ferme (Fabrication maison)"
+            feed_inv.notes = f"Session du {prep.date} · Formule : {formula_label}"
+            feed_inv._skip_sync_signal = True
+            feed_inv.save()
+        else:
+            feed_inv = FeedInventory(
+                batch=prep.batch,
+                expense=expense,
+                feed_type=prep.feed_type,
+                purchase_mode=FeedInventory.PurchaseMode.RETAIL,
+                purchase_date=prep.date,
+                quantity_kg=prep.total_produced_kg,
+                unit_price=unit_price_calc if unit_price_calc > 0 else Decimal("0.01"),
+                supplier="Provenderie ferme (Fabrication maison)",
+                notes=f"Session du {prep.date} · Formule : {formula_label}",
+            )
+            feed_inv._skip_sync_signal = True
+            feed_inv.save()
+            prep.feed_inventory = feed_inv
+
+        prep.save(update_fields=["expense", "feed_inventory"])
+
+
 @login_required
 @admin_required
 def feed_preparation_create(request, formula_id=None):
@@ -1171,102 +1319,7 @@ def feed_preparation_create(request, formula_id=None):
 
     if request.method == "POST" and form.is_valid():
         prep = form.save(commit=False)
-        milling_cost = prep.milling_cost or Decimal("0.00")
-
-        names = request.POST.getlist("item_name[]")
-        recipe_qtys = request.POST.getlist("item_recipe_qty[]")
-        recipe_units = request.POST.getlist("item_recipe_unit[]")
-        purchased_flags = request.POST.getlist("item_purchased[]")
-        descriptions = request.POST.getlist("item_desc[]")
-        costs = request.POST.getlist("item_cost[]")
-
-        items_to_create = []
-        total_items_cost = Decimal("0.00")
-
-        for idx, name in enumerate(names):
-            clean_name = (name or "").strip()
-            if not clean_name:
-                continue
-
-            qty_str = recipe_qtys[idx] if idx < len(recipe_qtys) else "0"
-            unit = recipe_units[idx] if idx < len(recipe_units) else "kg"
-            desc = descriptions[idx] if idx < len(descriptions) else ""
-            cost_str = costs[idx] if idx < len(costs) else "0"
-
-            is_purchased = True
-            if idx < len(purchased_flags):
-                is_purchased = purchased_flags[idx] in ("1", "true", "True", "on")
-
-            try:
-                recipe_qty = Decimal(qty_str.replace(",", ".")) if qty_str else Decimal("0.00")
-            except Exception:
-                recipe_qty = Decimal("0.00")
-
-            try:
-                purchase_cost = Decimal(cost_str.replace(",", ".")) if (is_purchased and cost_str) else Decimal("0.00")
-            except Exception:
-                purchase_cost = Decimal("0.00")
-
-            if not is_purchased:
-                purchase_cost = Decimal("0.00")
-
-            total_items_cost += purchase_cost
-
-            items_to_create.append({
-                "ingredient_name": clean_name,
-                "recipe_quantity": recipe_qty,
-                "recipe_unit": unit.strip() or "kg",
-                "purchased_today": is_purchased,
-                "purchased_description": desc.strip(),
-                "purchase_cost": purchase_cost,
-                "order": idx + 1,
-            })
-
-        total_spent = total_items_cost + milling_cost
-        prep.total_cost = total_spent
-
-        with transaction.atomic():
-            prep.save()
-
-            for item_data in items_to_create:
-                FeedPreparationItem.objects.create(
-                    preparation=prep,
-                    **item_data
-                )
-
-            cat_feed, _ = ExpenseCategory.objects.get_or_create(
-                name="Aliment",
-                defaults={"is_investment": False, "useful_life_months": 1}
-            )
-            formula_label = prep.formula.name if prep.formula else "Provende maison"
-            expense_designation = f"Fabrication provende {prep.get_feed_type_display()} · {prep.total_produced_kg:,.0f} kg ({formula_label})"
-
-            expense = Expense.objects.create(
-                batch=prep.batch,
-                category=cat_feed,
-                date=prep.date,
-                designation=expense_designation,
-                amount=prep.total_cost if prep.total_cost > 0 else Decimal("0.01"),
-            )
-
-            unit_price_calc = (prep.total_cost / prep.total_produced_kg).quantize(Decimal("0.01")) if prep.total_produced_kg > 0 else Decimal("0.01")
-            feed_inv = FeedInventory(
-                batch=prep.batch,
-                expense=expense,
-                feed_type=prep.feed_type,
-                purchase_mode=FeedInventory.PurchaseMode.RETAIL,
-                purchase_date=prep.date,
-                quantity_kg=prep.total_produced_kg,
-                unit_price=unit_price_calc if unit_price_calc > 0 else Decimal("0.01"),
-                supplier="Provenderie ferme (Fabrication maison)",
-                notes=f"Session du {prep.date} · Formule : {formula_label}",
-            )
-            feed_inv._skip_sync_signal = True
-            feed_inv.save()
-
-            prep.expense = expense
-            prep.feed_inventory = feed_inv
-            prep.save(update_fields=["expense", "feed_inventory"])
+        _extract_and_save_preparation_items(prep, request)
 
         messages.success(
             request,
@@ -1276,31 +1329,55 @@ def feed_preparation_create(request, formula_id=None):
         )
         return redirect("feed-preparation-detail", pk=prep.pk)
 
-    formulas_qs = FeedFormula.objects.filter(is_active=True).prefetch_related("items")
-    formulas_dict = {}
-    for f in formulas_qs:
-        formulas_dict[str(f.pk)] = {
-            "id": f.pk,
-            "name": f.name,
-            "feed_type": f.feed_type,
-            "target_total_kg": float(f.target_total_kg),
-            "commercial_bag_reference_price": float(f.commercial_bag_reference_price),
-            "items": [
-                {
-                    "name": item.ingredient_name,
-                    "quantity": float(item.quantity),
-                    "unit": item.unit,
-                    "default_unit_cost": float(item.default_unit_cost),
-                }
-                for item in f.items.all()
-            ]
-        }
-
     return render(request, "poulailler_core/feed_preparation_form.html", {
         "form": form,
         "initial_formula": initial_formula,
-        "formulas_json": json.dumps(formulas_dict),
+        "formulas_json": json.dumps(_get_formulas_dict()),
+        "existing_items_json": "null",
         "title": "Nouvelle fabrication d'aliment · Provende maison",
+    })
+
+
+@login_required
+@admin_required
+def feed_preparation_edit(request, pk):
+    """Modifier une session de fabrication d'aliments et synchroniser dépense et stock."""
+    prep = get_object_or_404(
+        FeedPreparation.objects.select_related("batch", "formula", "expense", "feed_inventory").prefetch_related("items"),
+        pk=pk
+    )
+    form = FeedPreparationForm(request.POST or None, instance=prep)
+
+    if request.method == "POST" and form.is_valid():
+        prep = form.save(commit=False)
+        _extract_and_save_preparation_items(prep, request)
+
+        messages.success(
+            request,
+            f"Fabrication mise à jour avec succès ! Stock ({prep.total_produced_kg:,.0f} kg de {prep.get_feed_type_display()}) "
+            f"et dépense ({prep.total_cost:,.0f} FCFA) synchronisés."
+        )
+        return redirect("feed-preparation-detail", pk=prep.pk)
+
+    existing_items_data = [
+        {
+            "name": item.ingredient_name,
+            "qty": float(item.recipe_quantity) if item.recipe_quantity is not None else "",
+            "unit": item.recipe_unit,
+            "cost": float(item.purchase_cost),
+            "is_purchased": item.purchased_today,
+            "desc": item.purchased_description,
+        }
+        for item in prep.items.all().order_by("order", "pk")
+    ]
+
+    return render(request, "poulailler_core/feed_preparation_form.html", {
+        "form": form,
+        "prep": prep,
+        "initial_formula": prep.formula,
+        "formulas_json": json.dumps(_get_formulas_dict()),
+        "existing_items_json": json.dumps(existing_items_data),
+        "title": f"Modifier la fabrication du {prep.date.strftime('%d/%m/%Y')} · {prep.get_feed_type_display()}",
     })
 
 

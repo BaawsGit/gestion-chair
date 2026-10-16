@@ -39,5 +39,6 @@ urlpatterns = [
     path("provende/formules/<int:pk>/supprimer/", views.feed_formula_delete, name="feed-formula-delete"),
     path("provende/preparer/", views.feed_preparation_create, name="feed-preparation-create"),
     path("provende/preparations/<int:pk>/", views.feed_preparation_detail, name="feed-preparation-detail"),
+    path("provende/preparations/<int:pk>/modifier/", views.feed_preparation_edit, name="feed-preparation-edit"),
     path("provende/preparations/<int:pk>/supprimer/", views.feed_preparation_delete, name="feed-preparation-delete"),
 ]

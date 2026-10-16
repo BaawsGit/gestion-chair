@@ -1,0 +1,279 @@
+{% extends 'base.html' %}
+{% block title %}{{ title }} · Gestion Chair{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="page-header-info">
+    <div class="d-flex align-items-center gap-2">
+      <span class="page-tag"><i class="bi bi-box-seam text-success"></i> GESTION DES STOCKS</span>
+    </div>
+    <h1 class="page-title">{{ title }}</h1>
+    <p class="page-subtitle">
+      Enregistrez vos entrées d'aliment : <strong>en sacs entiers</strong> ou <strong>au détail (en kg)</strong> avec comptabilisation automatique dans les dépenses.
+    </p>
+  </div>
+  <div class="page-header-actions">
+    <a class="btn-app-secondary" href="{% url 'feed-stock' %}">
+      <i class="bi bi-arrow-left"></i>
+      <span>Retour aux stocks</span>
+    </a>
+  </div>
+</div>
+
+<form method="post" class="app-form-card" id="feedPurchaseForm">
+  {% csrf_token %}
+
+  {% if form.non_field_errors %}
+  <div class="app-alert app-alert-danger mb-4">
+    <i class="bi bi-exclamation-triangle-fill fs-5 text-danger"></i>
+    <div>{{ form.non_field_errors }}</div>
+  </div>
+  {% endif %}
+
+  <!-- 1. Informations générales -->
+  <div class="row g-3 mb-4">
+    <div class="col-md-6">
+      <label class="form-label" for="{{ form.batch.id_for_label }}">
+        {{ form.batch.label }}
+      </label>
+      {{ form.batch }}
+      {% if form.batch.help_text %}
+        <div class="form-text"><i class="bi bi-info-circle me-1"></i> {{ form.batch.help_text }}</div>
+      {% endif %}
+      {% for error in form.batch.errors %}
+        <div class="form-errors"><i class="bi bi-exclamation-circle me-1"></i> {{ error }}</div>
+      {% endfor %}
+    </div>
+
+    <div class="col-md-3">
+      <label class="form-label" for="{{ form.feed_type.id_for_label }}">
+        {{ form.feed_type.label }} <span class="text-danger">*</span>
+      </label>
+      {{ form.feed_type }}
+      {% for error in form.feed_type.errors %}
+        <div class="form-errors"><i class="bi bi-exclamation-circle me-1"></i> {{ error }}</div>
+      {% endfor %}
+    </div>
+
+    <div class="col-md-3">
+      <label class="form-label" for="{{ form.purchase_date.id_for_label }}">
+        {{ form.purchase_date.label }} <span class="text-danger">*</span>
+      </label>
+      {{ form.purchase_date }}
+      {% for error in form.purchase_date.errors %}
+        <div class="form-errors"><i class="bi bi-exclamation-circle me-1"></i> {{ error }}</div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- 2. Mode d'achat (Sacs vs Au Détail) -->
+  <div class="card border rounded-3 p-4 mb-4 bg-light shadow-sm">
+    <div class="d-flex align-items-center justify-content-between mb-3 border-bottom pb-2">
+      <h3 class="h6 mb-0 text-dark fw-bold">
+        <i class="bi bi-cart3 text-success me-2"></i>Mode d'approvisionnement
+      </h3>
+      <span class="badge bg-success-subtle text-success border border-success-subtle px-2 py-1">
+        Sacs ou Détail (kg)
+      </span>
+    </div>
+
+    <div class="row g-3">
+      <div class="col-md-12 mb-2">
+        <label class="form-label fw-bold" for="id_purchase_mode">Format d'achat <span class="text-danger">*</span></label>
+        {{ form.purchase_mode }}
+        <div class="form-text">
+          Sélectionnez <strong>Au détail (en kg)</strong> si vous achetez par exemple 5 kg, 10 kg, 15 kg... ou <strong>En sac(s)</strong> pour des sacs de 25 kg, 50 kg ou 100 kg.
+        </div>
+        {% for error in form.purchase_mode.errors %}
+          <div class="form-errors"><i class="bi bi-exclamation-circle me-1"></i> {{ error }}</div>
+        {% endfor %}
+      </div>
+
+      <!-- Section Mode Sacs -->
+      <div class="col-12" id="sectionBags">
+        <div class="row g-3 p-3 bg-white rounded border">
+          <div class="col-md-6">
+            <label class="form-label fw-semibold" for="id_bags_purchased">
+              Nombre de sacs achetés <span class="text-danger">*</span>
+            </label>
+            {{ form.bags_purchased }}
+            <div class="form-text">Ex: 1, 2, 5... sacs</div>
+            {% for error in form.bags_purchased.errors %}
+              <div class="form-errors"><i class="bi bi-exclamation-circle me-1"></i> {{ error }}</div>
+            {% endfor %}
+          </div>
+          <div class="col-md-6">
+            <label class="form-label fw-semibold" for="id_bag_weight_kg">
+              Poids par sac (kg) <span class="text-danger">*</span>
+            </label>
+            {{ form.bag_weight_kg }}
+            <div class="form-text">Ex: 50 kg (ou 25 kg, 100 kg...)</div>
+            {% for error in form.bag_weight_kg.errors %}
+              <div class="form-errors"><i class="bi bi-exclamation-circle me-1"></i> {{ error }}</div>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+
+      <!-- Section Mode Détail (kg) -->
+      <div class="col-12" id="sectionRetail" style="display: none;">
+        <div class="row g-3 p-3 bg-white rounded border border-success">
+          <div class="col-md-12">
+            <label class="form-label fw-semibold" for="id_quantity_kg">
+              Poids total acheté en kilogrammes (kg) <span class="text-danger">*</span>
+            </label>
+            {{ form.quantity_kg }}
+            <div class="form-text">Indiquez la quantité exacte en kg achetée au détail (ex: 10 pour 10 kg).</div>
+            {% for error in form.quantity_kg.errors %}
+              <div class="form-errors"><i class="bi bi-exclamation-circle me-1"></i> {{ error }}</div>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+
+      <!-- Prix unitaire -->
+      <div class="col-md-6 mt-3">
+        <label class="form-label fw-bold" for="id_unit_price" id="lblUnitPrice">
+          Prix unitaire (FCFA) <span class="text-danger">*</span>
+        </label>
+        {{ form.unit_price }}
+        <div class="form-text" id="helpUnitPrice">
+          Prix d'un sac en FCFA (en mode sac) ou prix au kilogramme (en mode détail).
+        </div>
+        {% for error in form.unit_price.errors %}
+          <div class="form-errors"><i class="bi bi-exclamation-circle me-1"></i> {{ error }}</div>
+        {% endfor %}
+      </div>
+
+      <!-- Total Live Calculation Card -->
+      <div class="col-md-6 mt-3">
+        <div class="p-3 bg-white rounded border h-100 d-flex flex-column justify-content-center">
+          <span class="text-uppercase small fw-bold text-muted mb-1">
+            <i class="bi bi-calculator me-1"></i> Récapitulatif calculé
+          </span>
+          <div class="d-flex align-items-baseline gap-2">
+            <span class="h4 mb-0 fw-bold text-success" id="calcTotalCost">0 FCFA</span>
+            <span class="text-muted small" id="calcTotalKg">(0.0 kg)</span>
+          </div>
+          <div class="small text-muted mt-1" id="calcDetailText">
+            Saisissez la quantité et le prix unitaire pour visualiser le calcul.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. Fournisseur & Notes -->
+  <div class="row g-3 mb-4">
+    <div class="col-md-6">
+      <label class="form-label" for="{{ form.supplier.id_for_label }}">
+        {{ form.supplier.label }}
+      </label>
+      {{ form.supplier }}
+      {% for error in form.supplier.errors %}
+        <div class="form-errors"><i class="bi bi-exclamation-circle me-1"></i> {{ error }}</div>
+      {% endfor %}
+    </div>
+
+    <div class="col-md-6">
+      <label class="form-label" for="{{ form.notes.id_for_label }}">
+        {{ form.notes.label }}
+      </label>
+      {{ form.notes }}
+      {% for error in form.notes.errors %}
+        <div class="form-errors"><i class="bi bi-exclamation-circle me-1"></i> {{ error }}</div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="d-flex align-items-center gap-3 pt-4 border-top">
+    <button class="btn-app-primary" type="submit">
+      <i class="bi bi-check-lg"></i>
+      <span>{{ submit_label|default:'Ajouter au stock et comptabiliser' }}</span>
+    </button>
+    <a class="btn-app-secondary" href="{% url 'feed-stock' %}">
+      <span>Annuler</span>
+    </a>
+  </div>
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  document.addEventListener('DOMContentLoaded', function () {
+    const modeSelect = document.getElementById('id_purchase_mode');
+    const sectionBags = document.getElementById('sectionBags');
+    const sectionRetail = document.getElementById('sectionRetail');
+    const lblUnitPrice = document.getElementById('lblUnitPrice');
+    const helpUnitPrice = document.getElementById('helpUnitPrice');
+
+    const inputBags = document.getElementById('id_bags_purchased');
+    const inputWeight = document.getElementById('id_bag_weight_kg');
+    const inputQtyKg = document.getElementById('id_quantity_kg');
+    const inputUnitPrice = document.getElementById('id_unit_price');
+
+    const calcTotalCost = document.getElementById('calcTotalCost');
+    const calcTotalKg = document.getElementById('calcTotalKg');
+    const calcDetailText = document.getElementById('calcDetailText');
+
+    function updateModeDisplay() {
+      const mode = modeSelect ? modeSelect.value : 'bags';
+      if (mode === 'retail') {
+        if (sectionBags) sectionBags.style.display = 'none';
+        if (sectionRetail) sectionRetail.style.display = 'block';
+        if (lblUnitPrice) lblUnitPrice.innerHTML = 'Prix par kilogramme (FCFA / kg) <span class="text-danger">*</span>';
+        if (helpUnitPrice) helpUnitPrice.textContent = 'Exemple : 1 000 FCFA pour 1 kg.';
+      } else {
+        if (sectionBags) sectionBags.style.display = 'block';
+        if (sectionRetail) sectionRetail.style.display = 'none';
+        if (lblUnitPrice) lblUnitPrice.innerHTML = 'Prix du sac (FCFA / sac) <span class="text-danger">*</span>';
+        if (helpUnitPrice) helpUnitPrice.textContent = 'Exemple : 22 500 FCFA le sac.';
+      }
+      recalculate();
+    }
+
+    function recalculate() {
+      const mode = modeSelect ? modeSelect.value : 'bags';
+      const unitPrice = parseFloat(inputUnitPrice ? inputUnitPrice.value : 0) || 0;
+
+      let totalKg = 0;
+      let totalCost = 0;
+      let summaryText = '';
+
+      if (mode === 'retail') {
+        const qty = parseFloat(inputQtyKg ? inputQtyKg.value : 0) || 0;
+        totalKg = qty;
+        totalCost = qty * unitPrice;
+        if (qty > 0 && unitPrice > 0) {
+          summaryText = `${qty.toFixed(1)} kg achetés à ${unitPrice.toLocaleString('fr-FR')} FCFA/kg`;
+        }
+      } else {
+        const bags = parseFloat(inputBags ? inputBags.value : 0) || 0;
+        const weight = parseFloat(inputWeight ? inputWeight.value : 0) || 50;
+        totalKg = bags * weight;
+        totalCost = bags * unitPrice;
+        if (bags > 0 && unitPrice > 0) {
+          summaryText = `${bags} sac(s) de ${weight} kg (${totalKg.toFixed(1)} kg) à ${unitPrice.toLocaleString('fr-FR')} FCFA/sac`;
+        }
+      }
+
+      if (calcTotalCost) calcTotalCost.textContent = `${Math.round(totalCost).toLocaleString('fr-FR')} FCFA`;
+      if (calcTotalKg) calcTotalKg.textContent = `(${totalKg.toFixed(1)} kg)`;
+      if (calcDetailText) calcDetailText.textContent = summaryText || 'Renseignez la quantité et le prix pour voir le calcul.';
+    }
+
+    if (modeSelect) {
+      modeSelect.addEventListener('change', updateModeDisplay);
+    }
+
+    [inputBags, inputWeight, inputQtyKg, inputUnitPrice].forEach(el => {
+      if (el) {
+        el.addEventListener('input', recalculate);
+        el.addEventListener('change', recalculate);
+      }
+    });
+
+    updateModeDisplay();
+  });
+</script>
+{% endblock %}

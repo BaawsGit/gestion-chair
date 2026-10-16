@@ -5,7 +5,11 @@ from .models import (
     Expense,
     ExpenseCategory,
     FeedConsumption,
+    FeedFormula,
+    FeedFormulaItem,
     FeedInventory,
+    FeedPreparation,
+    FeedPreparationItem,
     Mortality,
     ProphylaxisProgram,
     Sale,
@@ -64,8 +68,8 @@ class MortalityAdmin(admin.ModelAdmin):
 
 @admin.register(FeedInventory)
 class FeedInventoryAdmin(admin.ModelAdmin):
-    list_display = ("purchase_date", "batch", "feed_type", "bags_purchased", "bag_weight_kg", "unit_price", "total_cost", "expense", "supplier")
-    list_filter = ("batch", "feed_type", "purchase_date")
+    list_display = ("purchase_date", "batch", "feed_type", "purchase_mode", "bags_purchased", "bag_weight_kg", "quantity_kg", "unit_price", "total_cost", "expense", "supplier")
+    list_filter = ("purchase_mode", "feed_type", "batch", "purchase_date")
     search_fields = ("supplier", "notes", "batch__name")
 
 
@@ -98,3 +102,33 @@ class SaleAdmin(admin.ModelAdmin):
     list_filter = ("payment_status", "date")
     search_fields = ("batch__name", "customer_name")
     date_hierarchy = "date"
+
+
+class FeedFormulaItemInline(admin.TabularInline):
+    model = FeedFormulaItem
+    extra = 1
+    fields = ("order", "ingredient_name", "quantity", "unit", "default_unit_cost")
+
+
+@admin.register(FeedFormula)
+class FeedFormulaAdmin(admin.ModelAdmin):
+    list_display = ("name", "feed_type", "target_total_kg", "commercial_bag_reference_price", "is_active", "created_at")
+    list_filter = ("feed_type", "is_active")
+    search_fields = ("name", "notes")
+    inlines = (FeedFormulaItemInline,)
+
+
+class FeedPreparationItemInline(admin.TabularInline):
+    model = FeedPreparationItem
+    extra = 0
+    fields = ("order", "ingredient_name", "recipe_quantity", "recipe_unit", "purchased_today", "purchased_description", "purchase_cost")
+
+
+@admin.register(FeedPreparation)
+class FeedPreparationAdmin(admin.ModelAdmin):
+    list_display = ("date", "feed_type", "batch", "formula", "total_produced_kg", "total_cost", "cost_per_kg", "cost_per_50kg_bag", "savings_amount")
+    list_filter = ("feed_type", "date", "batch")
+    search_fields = ("notes", "batch__name", "formula__name")
+    date_hierarchy = "date"
+    inlines = (FeedPreparationItemInline,)
+

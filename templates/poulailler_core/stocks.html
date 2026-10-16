@@ -88,7 +88,7 @@
             <tr>
               <th>Date</th>
               <th>Aliment / Lot</th>
-              <th>Sacs</th>
+              <th>Quantité / Format</th>
               <th class="text-end">Montant</th>
               <th>Dépense</th>
               {% if user.is_staff %}
@@ -112,12 +112,23 @@
                 </div>
               </td>
               <td>
-                <span class="fw-bold text-success">{{ p.bags_purchased }} sac{{ p.bags_purchased|pluralize }}</span>
-                <span class="text-muted small d-block">{{ p.bag_weight_kg|floatformat:0 }} kg/sac</span>
+                {% if p.purchase_mode == 'retail' %}
+                  <span class="fw-bold text-success">{{ p.quantity_kg|floatformat:1 }} kg</span>
+                  <span class="badge bg-success-subtle text-success border border-success-subtle small d-inline-block ms-1">Au détail</span>
+                {% else %}
+                  <span class="fw-bold text-success">{{ p.bags_purchased }} sac{{ p.bags_purchased|pluralize }}</span>
+                  <span class="text-muted small d-block">{{ p.bag_weight_kg|floatformat:0 }} kg/sac ({{ p.total_weight_kg|floatformat:0 }} kg)</span>
+                {% endif %}
               </td>
               <td class="text-end text-nowrap">
-                <span class="fw-bold text-dark">{{ p.total_cost|floatformat:0 }}</span>
-                <small class="text-muted d-block">{{ p.unit_price|floatformat:0 }} F/sac</small>
+                <span class="fw-bold text-dark">{{ p.total_cost|floatformat:0 }} FCFA</span>
+                <small class="text-muted d-block">
+                  {% if p.purchase_mode == 'retail' %}
+                    {{ p.unit_price|floatformat:0 }} F/kg
+                  {% else %}
+                    {{ p.unit_price|floatformat:0 }} F/sac
+                  {% endif %}
+                </small>
               </td>
               <td class="text-nowrap">
                 {% if p.expense %}

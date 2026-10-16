@@ -174,6 +174,10 @@ class FeedType(models.TextChoices):
 
 
 class FeedInventory(models.Model):
+    class PurchaseMode(models.TextChoices):
+        BAGS = "bags", "En sac(s)"
+        RETAIL = "retail", "Au détail (en kg)"
+
     batch = models.ForeignKey(
         Batch, verbose_name="lot", related_name="feed_inventories",
         null=True, blank=True, on_delete=models.SET_NULL,
@@ -181,47 +185,90 @@ class FeedInventory(models.Model):
     )
     expense = models.OneToOneField(
         Expense, verbose_name="dépense associée", related_name="feed_inventory",
-        null=True, blank=True, on_delete=models.SET_NULL
+        null=True, blank=True, on_delete=models.CASCADE
     )
     feed_type = models.CharField("type d'aliment", max_length=10, choices=FeedType.choices)
+    purchase_mode = models.CharField(
+        "mode d'achat", max_length=10, choices=PurchaseMode.choices, default=PurchaseMode.BAGS
+    )
     purchase_date = models.DateField("date d'achat")
-    bags_purchased = models.PositiveIntegerField("sacs achetés", validators=[MinValueValidator(1)])
+    bags_purchased = models.PositiveIntegerField(
+        "sacs achetés", null=True, blank=True, validators=[MinValueValidator(1)]
+    )
     bag_weight_kg = models.DecimalField(
         "poids par sac (kg)", max_digits=7, decimal_places=2,
-        validators=[MinValueValidator(Decimal("0.01"))]
+        null=True, blank=True, validators=[MinValueValidator(Decimal("0.01"))]
+    )
+    quantity_kg = models.DecimalField(
+        "quantité (kg)", max_digits=10, decimal_places=2,
+        null=True, blank=True, validators=[MinValueValidator(Decimal("0.01"))]
     )
     unit_price = models.DecimalField(
-        "prix du sac", max_digits=12, decimal_places=2,
-        validators=[MinValueValidator(Decimal("0.01"))]
+        "prix unitaire (sac ou kg)", max_digits=12, decimal_places=2,
+        validators=[MinValueValidator(Decimal("0.01"))],
+        help_text="Prix d'un sac (en mode sac) ou prix par kg (en mode détail)."
     )
     supplier = models.CharField("fournisseur", max_length=120, blank=True)
     notes = models.TextField("notes", blank=True)
 
     @property
+    def total_weight_kg(self):
+        if self.purchase_mode == self.PurchaseMode.RETAIL:
+            return self.quantity_kg or Decimal("0.00")
+        bags = Decimal(self.bags_purchased or 0)
+        weight = self.bag_weight_kg or Decimal("50.00")
+        return (bags * weight).quantize(Decimal("0.01"))
+
+    @property
     def total_cost(self):
-        return (Decimal(self.bags_purchased) * self.unit_price).quantize(Decimal("0.01"))
+        if self.purchase_mode == self.PurchaseMode.RETAIL:
+            qty = self.quantity_kg or Decimal("0.00")
+            return (qty * self.unit_price).quantize(Decimal("0.01"))
+        bags = Decimal(self.bags_purchased or 0)
+        return (bags * self.unit_price).quantize(Decimal("0.01"))
+
+    def clean(self):
+        super().clean()
+        from django.core.exceptions import ValidationError
+        if self.purchase_mode == self.PurchaseMode.RETAIL:
+            if not self.quantity_kg or self.quantity_kg <= 0:
+                raise ValidationError({"quantity_kg": "Veuillez renseigner le poids acheté en kg au détail."})
+        else:
+            if not self.bags_purchased or self.bags_purchased <= 0:
+                raise ValidationError({"bags_purchased": "Veuillez renseigner le nombre de sacs achetés."})
+            if not self.bag_weight_kg or self.bag_weight_kg <= 0:
+                raise ValidationError({"bag_weight_kg": "Veuillez renseigner le poids d'un sac en kg."})
 
     class Meta:
         ordering = ["-purchase_date", "feed_type"]
         constraints = [
-            models.CheckConstraint(condition=Q(bags_purchased__gt=0), name="feed_bags_positive"),
-            models.CheckConstraint(condition=Q(bag_weight_kg__gt=0), name="feed_bag_weight_positive"),
             models.CheckConstraint(condition=Q(unit_price__gt=0), name="feed_unit_price_positive"),
         ]
         verbose_name = "entrée de stock d'aliment"
         verbose_name_plural = "stocks d'aliments"
 
     def __str__(self):
+        if self.purchase_mode == self.PurchaseMode.RETAIL:
+            return f"{self.get_feed_type_display()} - {self.quantity_kg} kg ({self.purchase_date})"
         return f"{self.get_feed_type_display()} - {self.bags_purchased} sacs ({self.purchase_date})"
 
     @classmethod
     def stock_summary(cls):
         summary = {}
         for feed_type, label in FeedType.choices:
-            purchases = list(cls.objects.filter(feed_type=feed_type).values_list("bags_purchased", "bag_weight_kg"))
-            purchased_bags = sum((Decimal(bags) for bags, _ in purchases), Decimal("0"))
-            purchased_kg = sum((Decimal(bags) * weight for bags, weight in purchases), Decimal("0"))
-            average_bag_weight = purchased_kg / purchased_bags if purchased_bags else Decimal("0")
+            purchases = cls.objects.filter(feed_type=feed_type)
+            purchased_kg = Decimal("0.00")
+            total_bag_kg = Decimal("0.00")
+            total_bags_count = Decimal("0.00")
+
+            for p in purchases:
+                purchased_kg += p.total_weight_kg
+                if p.purchase_mode == cls.PurchaseMode.BAGS and p.bags_purchased and p.bag_weight_kg:
+                    total_bags_count += Decimal(p.bags_purchased)
+                    total_bag_kg += Decimal(p.bags_purchased) * p.bag_weight_kg
+
+            average_bag_weight = (total_bag_kg / total_bags_count) if total_bags_count > 0 else Decimal("50.00")
+
             consumption = FeedConsumption.objects.filter(feed_type=feed_type).aggregate(
                 bags=Sum("bags_consumed"), kilograms=Sum("kg_consumed")
             )
@@ -365,3 +412,173 @@ class Sale(models.Model):
 
     def __str__(self):
         return f"{self.batch} - {self.quantity_sold} poulet(s) - {self.total_amount}"
+
+
+class FeedFormula(models.Model):
+    name = models.CharField("nom de la formule", max_length=120, unique=True)
+    feed_type = models.CharField("stade / type d'aliment", max_length=10, choices=FeedType.choices, default=FeedType.GROWER)
+    target_total_kg = models.DecimalField(
+        "poids total visé (kg)", max_digits=8, decimal_places=2, default=Decimal("300.00"),
+        validators=[MinValueValidator(Decimal("1.00"))]
+    )
+    commercial_bag_reference_price = models.DecimalField(
+        "prix repère sac 50kg du commerce (FCFA)", max_digits=10, decimal_places=2, default=Decimal("18000.00"),
+        validators=[MinValueValidator(Decimal("0.00"))],
+        help_text="Prix moyen d'un sac de 50 kg industriel équivalent sur le marché pour estimer les économies."
+    )
+    notes = models.TextField("instructions & composition", blank=True)
+    is_active = models.BooleanField("active", default=True)
+    created_at = models.DateTimeField("créée le", auto_now_add=True)
+
+    class Meta:
+        ordering = ["feed_type", "name"]
+        verbose_name = "formule d'aliment"
+        verbose_name_plural = "formules d'aliments"
+
+    def __str__(self):
+        return f"{self.name} ({self.get_feed_type_display()} · {self.target_total_kg:,.0f} kg)"
+
+    @property
+    def total_ingredients_count(self):
+        return self.items.count()
+
+    @property
+    def theoretical_total_cost(self):
+        return sum((item.theoretical_cost for item in self.items.all()), Decimal("0.00"))
+
+    @property
+    def theoretical_cost_per_kg(self):
+        if self.target_total_kg > 0:
+            return (self.theoretical_total_cost / self.target_total_kg).quantize(Decimal("0.01"))
+        return Decimal("0.00")
+
+    @property
+    def theoretical_cost_per_50kg_bag(self):
+        return (self.theoretical_cost_per_kg * Decimal("50.00")).quantize(Decimal("0.01"))
+
+
+class FeedFormulaItem(models.Model):
+    formula = models.ForeignKey(FeedFormula, verbose_name="formule", related_name="items", on_delete=models.CASCADE)
+    ingredient_name = models.CharField("nom de l'ingrédient", max_length=100)
+    quantity = models.DecimalField("quantité requise", max_digits=8, decimal_places=3, validators=[MinValueValidator(Decimal("0.001"))])
+    unit = models.CharField("unité", max_length=20, default="kg")
+    default_unit_cost = models.DecimalField(
+        "prix unitaire indicatif (FCFA)", max_digits=10, decimal_places=2, default=Decimal("0.00"),
+        validators=[MinValueValidator(Decimal("0.00"))],
+        help_text="Prix d'achat moyen (par kg, sachet ou litre)."
+    )
+    order = models.PositiveSmallIntegerField("ordre d'affichage", default=0)
+
+    class Meta:
+        ordering = ["order", "pk"]
+        verbose_name = "ingrédient de formule"
+        verbose_name_plural = "ingrédients de formule"
+
+    def __str__(self):
+        return f"{self.ingredient_name} ({self.quantity} {self.unit})"
+
+    @property
+    def theoretical_cost(self):
+        return (self.quantity * self.default_unit_cost).quantize(Decimal("0.01"))
+
+
+class FeedPreparation(models.Model):
+    batch = models.ForeignKey(
+        Batch, verbose_name="lot concerné", related_name="feed_preparations",
+        null=True, blank=True, on_delete=models.SET_NULL,
+        help_text="Lot qui recevra et consommera cet aliment (ou ferme générale)."
+    )
+    formula = models.ForeignKey(
+        FeedFormula, verbose_name="formule utilisée", related_name="preparations",
+        null=True, blank=True, on_delete=models.SET_NULL
+    )
+    feed_type = models.CharField("type d'aliment produit", max_length=10, choices=FeedType.choices, default=FeedType.GROWER)
+    date = models.DateField("date de préparation", default=timezone.localdate)
+    total_produced_kg = models.DecimalField(
+        "quantité finale produite (kg)", max_digits=8, decimal_places=2, default=Decimal("300.00"),
+        validators=[MinValueValidator(Decimal("0.10"))],
+        help_text="Nombre total de kilogrammes prêts à être distribués aux poulets."
+    )
+    milling_cost = models.DecimalField(
+        "frais de meunier / broyage / mélange (FCFA)", max_digits=10, decimal_places=2, default=Decimal("0.00"),
+        validators=[MinValueValidator(Decimal("0.00"))]
+    )
+    total_cost = models.DecimalField(
+        "montant total décaissé (FCFA)", max_digits=12, decimal_places=2, default=Decimal("0.00"),
+        validators=[MinValueValidator(Decimal("0.00"))],
+        help_text="Total réel décaissé en caisse pour cette préparation (achats du jour + mouture)."
+    )
+    commercial_bag_reference_price = models.DecimalField(
+        "prix repère sac 50kg du commerce (FCFA)", max_digits=10, decimal_places=2, default=Decimal("18000.00"),
+        validators=[MinValueValidator(Decimal("0.00"))]
+    )
+    expense = models.OneToOneField(
+        Expense, verbose_name="dépense associée", related_name="feed_preparation",
+        null=True, blank=True, on_delete=models.SET_NULL
+    )
+    feed_inventory = models.OneToOneField(
+        FeedInventory, verbose_name="stock d'aliment associé", related_name="feed_preparation",
+        null=True, blank=True, on_delete=models.SET_NULL
+    )
+    notes = models.TextField("notes & observations", blank=True)
+    created_at = models.DateTimeField("créée le", auto_now_add=True)
+
+    class Meta:
+        ordering = ["-date", "-pk"]
+        verbose_name = "préparation d'aliment"
+        verbose_name_plural = "préparations d'aliments"
+
+    def __str__(self):
+        return f"Préparation {self.get_feed_type_display()} · {self.total_produced_kg:,.0f} kg du {self.date}"
+
+    @property
+    def cost_per_kg(self):
+        if self.total_produced_kg > 0:
+            return (self.total_cost / self.total_produced_kg).quantize(Decimal("0.01"))
+        return Decimal("0.00")
+
+    @property
+    def cost_per_50kg_bag(self):
+        return (self.cost_per_kg * Decimal("50.00")).quantize(Decimal("0.01"))
+
+    @property
+    def commercial_cost_equivalent(self):
+        if self.commercial_bag_reference_price > 0 and self.total_produced_kg > 0:
+            return ((self.total_produced_kg / Decimal("50.00")) * self.commercial_bag_reference_price).quantize(Decimal("0.01"))
+        return Decimal("0.00")
+
+    @property
+    def savings_amount(self):
+        return (self.commercial_cost_equivalent - self.total_cost).quantize(Decimal("0.01"))
+
+    @property
+    def savings_percent(self):
+        if self.commercial_cost_equivalent > 0:
+            return ((self.savings_amount / self.commercial_cost_equivalent) * Decimal("100.00")).quantize(Decimal("0.1"))
+        return Decimal("0.0")
+
+
+class FeedPreparationItem(models.Model):
+    preparation = models.ForeignKey(FeedPreparation, verbose_name="session de préparation", related_name="items", on_delete=models.CASCADE)
+    ingredient_name = models.CharField("nom de l'ingrédient", max_length=100)
+    recipe_quantity = models.DecimalField("quantité incorporée", max_digits=8, decimal_places=3, null=True, blank=True)
+    recipe_unit = models.CharField("unité incorporée", max_length=20, default="kg")
+    purchased_today = models.BooleanField(
+        "acheté aujourd'hui", default=True,
+        help_text="Coché = achat décaissé ce jour. Décoché = pris sur réserve existante (0 FCFA)."
+    )
+    purchased_description = models.CharField("conditionnement acheté", max_length=150, blank=True, help_text="Ex: 180 kg, 1 sachet de 1 kg, 2 bidons de 1.5 L...")
+    purchase_cost = models.DecimalField(
+        "montant payé (FCFA)", max_digits=10, decimal_places=2, default=Decimal("0.00"),
+        validators=[MinValueValidator(Decimal("0.00"))]
+    )
+    order = models.PositiveSmallIntegerField("ordre", default=0)
+
+    class Meta:
+        ordering = ["order", "pk"]
+        verbose_name = "ingrédient de préparation"
+        verbose_name_plural = "ingrédients de préparation"
+
+    def __str__(self):
+        return f"{self.ingredient_name} : {self.purchase_cost} FCFA"
+

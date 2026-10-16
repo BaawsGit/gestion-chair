@@ -1,0 +1,462 @@
+{% extends 'base.html' %}
+{% block title %}{{ title }} · Gestion Chair{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="page-header-info">
+    <div class="d-flex align-items-center gap-2">
+      <span class="page-tag"><i class="bi bi-play-circle text-success"></i> SESSION DE FABRICATION</span>
+    </div>
+    <h1 class="page-title">{{ title }}</h1>
+    <p class="page-subtitle">
+      Renseignez les matières premières utilisées. Pour chaque additif ou ingrédient, indiquez s'il a été acheté aujourd'hui (décaissement réel) ou pris sur le reliquat d'une précédente préparation (0 FCFA).
+    </p>
+  </div>
+  <div class="page-header-actions">
+    <a class="btn-app-secondary" href="{% url 'feed-formula-list' %}">
+      <i class="bi bi-arrow-left"></i>
+      <span>Retour aux formules</span>
+    </a>
+  </div>
+</div>
+
+<form method="post" class="app-form-card" id="feedPrepForm">
+  {% csrf_token %}
+
+  {% if form.non_field_errors %}
+  <div class="app-alert app-alert-danger mb-4">
+    <i class="bi bi-exclamation-triangle-fill fs-5 text-danger"></i>
+    <div>{{ form.non_field_errors }}</div>
+  </div>
+  {% endif %}
+
+  <!-- 1. Paramètres de la session -->
+  <div class="card border rounded-3 p-4 mb-4 bg-white shadow-sm">
+    <h3 class="h6 text-success fw-bold border-bottom pb-2 mb-3">
+      <i class="bi bi-gear-fill me-2"></i>1. Paramètres généraux de la fabrication
+    </h3>
+
+    <div class="row g-3">
+      <div class="col-md-4">
+        <label class="form-label fw-bold" for="id_prep_formula">
+          Modèle de formule (Recette)
+        </label>
+        {{ form.formula }}
+        <div class="form-text">Charge automatiquement les ingrédients et proportions.</div>
+        {% for error in form.formula.errors %}
+          <div class="form-errors"><i class="bi bi-exclamation-circle me-1"></i> {{ error }}</div>
+        {% endfor %}
+      </div>
+
+      <div class="col-md-4">
+        <label class="form-label fw-bold" for="id_prep_batch">
+          Lot concerné
+        </label>
+        {{ form.batch }}
+        <div class="form-text">Ce lot consommera la provende produite.</div>
+        {% for error in form.batch.errors %}
+          <div class="form-errors"><i class="bi bi-exclamation-circle me-1"></i> {{ error }}</div>
+        {% endfor %}
+      </div>
+
+      <div class="col-md-4">
+        <label class="form-label fw-bold" for="id_prep_feed_type">
+          Type d'aliment produit <span class="text-danger">*</span>
+        </label>
+        {{ form.feed_type }}
+        <div class="form-text">Stade : Démarrage, Croissance ou Finition.</div>
+        {% for error in form.feed_type.errors %}
+          <div class="form-errors"><i class="bi bi-exclamation-circle me-1"></i> {{ error }}</div>
+        {% endfor %}
+      </div>
+
+      <div class="col-md-3">
+        <label class="form-label fw-bold" for="id_prep_date">
+          Date de fabrication <span class="text-danger">*</span>
+        </label>
+        {{ form.date }}
+        {% for error in form.date.errors %}
+          <div class="form-errors"><i class="bi bi-exclamation-circle me-1"></i> {{ error }}</div>
+        {% endfor %}
+      </div>
+
+      <div class="col-md-3">
+        <label class="form-label fw-bold text-success" for="id_prep_total_produced_kg">
+          Quantité finale produite (kg) <span class="text-danger">*</span>
+        </label>
+        {{ form.total_produced_kg }}
+        <div class="form-text">Ex: <strong>300</strong> kg versés au stock.</div>
+        {% for error in form.total_produced_kg.errors %}
+          <div class="form-errors"><i class="bi bi-exclamation-circle me-1"></i> {{ error }}</div>
+        {% endfor %}
+      </div>
+
+      <div class="col-md-3">
+        <label class="form-label fw-semibold" for="id_prep_milling_cost">
+          Frais meunier / broyage (FCFA)
+        </label>
+        {{ form.milling_cost }}
+        <div class="form-text">Coût du broyage ou électricité (optionnel).</div>
+        {% for error in form.milling_cost.errors %}
+          <div class="form-errors"><i class="bi bi-exclamation-circle me-1"></i> {{ error }}</div>
+        {% endfor %}
+      </div>
+
+      <div class="col-md-3">
+        <label class="form-label fw-semibold" for="id_prep_ref_bag_price">
+          Réf. sac 50kg commerce (FCFA)
+        </label>
+        {{ form.commercial_bag_reference_price }}
+        <div class="form-text">Prix du sac d'usine (pour calcul du gain).</div>
+        {% for error in form.commercial_bag_reference_price.errors %}
+          <div class="form-errors"><i class="bi bi-exclamation-circle me-1"></i> {{ error }}</div>
+        {% endfor %}
+      </div>
+
+      <div class="col-12">
+        <label class="form-label" for="{{ form.notes.id_for_label }}">
+          Notes & observations sur le mélange
+        </label>
+        {{ form.notes }}
+        {% for error in form.notes.errors %}
+          <div class="form-errors"><i class="bi bi-exclamation-circle me-1"></i> {{ error }}</div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. Tableau des achats réels vs réserve -->
+  <div class="card border border-success rounded-3 p-4 mb-4 bg-light shadow-sm">
+    <div class="d-flex align-items-center justify-content-between mb-3 border-bottom pb-2 flex-wrap gap-2">
+      <div>
+        <h3 class="h6 mb-0 text-success fw-bold">
+          <i class="bi bi-basket2-fill me-2"></i>2. Décaissements réels pour les ingrédients
+        </h3>
+        <span class="small text-muted">
+          Si un ingrédient a été acheté aujourd'hui, laissez <strong>Acheté aujourd'hui</strong> et indiquez le montant. Si vous utilisez un reliquat existant, décochez simplement : le montant passe à 0 FCFA !
+        </span>
+      </div>
+      <button type="button" class="btn btn-sm btn-outline-success fw-bold" id="addPrepItemBtn">
+        <i class="bi bi-plus-circle me-1"></i> Ajouter un ingrédient libre
+      </button>
+    </div>
+
+    <div class="table-responsive">
+      <table class="table table-sm align-middle bg-white rounded border mb-0" id="prepItemsTable">
+        <thead class="table-light text-muted text-uppercase small">
+          <tr>
+            <th style="width: 25%;">Matière première / Ingrédient</th>
+            <th style="width: 15%;">Dans le mélange</th>
+            <th style="width: 20%;" class="text-center">Origine de l'ingrédient</th>
+            <th style="width: 20%;">Conditionnement acheté</th>
+            <th style="width: 15%;" class="text-end">Montant payé (FCFA)</th>
+            <th style="width: 5%;" class="text-center"></th>
+          </tr>
+        </thead>
+        <tbody id="prepItemsBody">
+          <!-- Dynamically filled by JS based on selected formula or defaults -->
+        </tbody>
+      </table>
+    </div>
+
+    <!-- 3. Bilan Financier Live & Gain Réalisé -->
+    <div class="card border border-success rounded-3 mt-4 bg-white shadow-sm overflow-hidden">
+      <div class="card-header bg-success text-white py-2 px-3 d-flex align-items-center justify-content-between">
+        <span class="fw-bold"><i class="bi bi-calculator me-1"></i> Bilan Financier & Rentabilité en Direct</span>
+        <span class="badge bg-white text-success px-2 py-1"><i class="bi bi-lightning-charge-fill me-1"></i> Calcul instantané</span>
+      </div>
+      <div class="card-body p-3">
+        <div class="row g-3 text-center text-md-start">
+          <div class="col-md-3 border-end">
+            <span class="text-muted small text-uppercase fw-bold d-block">Total décaissé en caisse :</span>
+            <span class="display-6 fw-bold text-dark" id="livePrepTotalCost">0 FCFA</span>
+            <div class="text-muted small" id="livePrepMillingDetail">(Achats + Broyage 0 F)</div>
+          </div>
+          <div class="col-md-3 border-end">
+            <span class="text-muted small text-uppercase fw-bold d-block">Coût réel de revient :</span>
+            <span class="fs-4 fw-bold text-success d-block" id="livePrepCostPerKg">0 F / kg</span>
+            <div class="text-muted small">Soit <strong class="text-dark" id="livePrepCostPerBag">0 FCFA</strong> le sac équivalent 50kg</div>
+          </div>
+          <div class="col-md-3 border-end">
+            <span class="text-muted small text-uppercase fw-bold d-block">Équivalent sac industriel :</span>
+            <span class="fs-4 fw-semibold text-secondary d-block" id="livePrepCommercialEquivalent">0 FCFA</span>
+            <div class="text-muted small">Prix magasin de référence</div>
+          </div>
+          <div class="col-md-3">
+            <span class="text-muted small text-uppercase fw-bold d-block">Économie réalisée :</span>
+            <span class="fs-4 fw-bold text-success d-block" id="livePrepSavings">+0 FCFA</span>
+            <span class="app-badge badge-success-soft mt-1" id="livePrepSavingsBadge">+0% d'économie</span>
+          </div>
+        </div>
+
+        <div class="alert alert-success d-flex align-items-center gap-2 mt-3 mb-0 py-2 px-3 small">
+          <i class="bi bi-box-arrow-in-down fs-5"></i>
+          <div>
+            <strong>Impact automatique :</strong> À la validation, une seule dépense de <span class="fw-bold" id="impactExpenseLabel">0 FCFA</span> sera créée dans la catégorie <em>Aliment</em>, et <span class="fw-bold text-success" id="impactStockLabel">+300 kg</span> seront versés au stock disponible de provende.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="d-flex align-items-center gap-3 pt-3 border-top">
+    <button class="btn-app-primary fs-6 py-2 px-4 shadow" type="submit">
+      <i class="bi bi-check2-circle fs-5"></i>
+      <span>Enregistrer & Synchroniser le stock</span>
+    </button>
+    <a class="btn-app-secondary" href="{% url 'feed-formula-list' %}">
+      <span>Annuler</span>
+    </a>
+  </div>
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // Formula data provided by Django view
+  const FORMULAS_DATA = {{ formulas_json|safe }};
+
+  document.addEventListener('DOMContentLoaded', function () {
+    const formulaSelect = document.getElementById('id_prep_formula');
+    const feedTypeSelect = document.getElementById('id_prep_feed_type');
+    const totalProducedInput = document.getElementById('id_prep_total_produced_kg');
+    const millingCostInput = document.getElementById('id_prep_milling_cost');
+    const refBagPriceInput = document.getElementById('id_prep_ref_bag_price');
+    const itemsBody = document.getElementById('prepItemsBody');
+    const addBtn = document.getElementById('addPrepItemBtn');
+
+    const liveTotalCost = document.getElementById('livePrepTotalCost');
+    const liveMillingDetail = document.getElementById('livePrepMillingDetail');
+    const liveCostPerKg = document.getElementById('livePrepCostPerKg');
+    const liveCostPerBag = document.getElementById('livePrepCostPerBag');
+    const liveCommercialEquivalent = document.getElementById('livePrepCommercialEquivalent');
+    const liveSavings = document.getElementById('livePrepSavings');
+    const liveSavingsBadge = document.getElementById('livePrepSavingsBadge');
+    const impactExpenseLabel = document.getElementById('impactExpenseLabel');
+    const impactStockLabel = document.getElementById('impactStockLabel');
+
+    function calculateLive() {
+      let itemsCost = 0;
+      const rows = itemsBody.querySelectorAll('.prep-item-row');
+
+      rows.forEach(row => {
+        const checkbox = row.querySelector('.purchased-toggle');
+        const costInput = row.querySelector('.item-cost-input');
+        const isPurchased = checkbox ? checkbox.checked : true;
+
+        if (isPurchased) {
+          const cost = parseFloat(costInput ? costInput.value : 0) || 0;
+          itemsCost += cost;
+          if (costInput) costInput.disabled = false;
+        } else {
+          if (costInput) {
+            costInput.value = '0';
+            costInput.disabled = true;
+          }
+        }
+      });
+
+      const millingCost = parseFloat(millingCostInput ? millingCostInput.value : 0) || 0;
+      const totalCost = itemsCost + millingCost;
+      const producedKg = parseFloat(totalProducedInput ? totalProducedInput.value : 0) || 1;
+      const refBagPrice = parseFloat(refBagPriceInput ? refBagPriceInput.value : 18000) || 18000;
+
+      const costPerKg = producedKg > 0 ? (totalCost / producedKg) : 0;
+      const costPerBag = costPerKg * 50;
+      const commercialEquiv = (producedKg / 50) * refBagPrice;
+      const savings = commercialEquiv - totalCost;
+      const savingsPercent = commercialEquiv > 0 ? ((savings / commercialEquiv) * 100) : 0;
+
+      if (liveTotalCost) liveTotalCost.textContent = `${Math.round(totalCost).toLocaleString('fr-FR')} FCFA`;
+      if (liveMillingDetail) liveMillingDetail.textContent = `(Matières : ${Math.round(itemsCost).toLocaleString('fr-FR')} F + Broyage : ${Math.round(millingCost).toLocaleString('fr-FR')} F)`;
+      if (liveCostPerKg) liveCostPerKg.textContent = `${Math.round(costPerKg).toLocaleString('fr-FR')} F / kg`;
+      if (liveCostPerBag) liveCostPerBag.textContent = `${Math.round(costPerBag).toLocaleString('fr-FR')} FCFA`;
+      if (liveCommercialEquivalent) liveCommercialEquivalent.textContent = `${Math.round(commercialEquiv).toLocaleString('fr-FR')} FCFA`;
+
+      if (liveSavings) {
+        if (savings >= 0) {
+          liveSavings.textContent = `+${Math.round(savings).toLocaleString('fr-FR')} FCFA`;
+          liveSavings.className = 'fs-4 fw-bold text-success d-block';
+        } else {
+          liveSavings.textContent = `${Math.round(savings).toLocaleString('fr-FR')} FCFA`;
+          liveSavings.className = 'fs-4 fw-bold text-danger d-block';
+        }
+      }
+
+      if (liveSavingsBadge) {
+        if (savings >= 0) {
+          liveSavingsBadge.textContent = `+${savingsPercent.toFixed(1)}% d'économie`;
+          liveSavingsBadge.className = 'app-badge badge-success-soft mt-1';
+        } else {
+          liveSavingsBadge.textContent = `${savingsPercent.toFixed(1)}% (plus cher)`;
+          liveSavingsBadge.className = 'app-badge badge-danger-soft mt-1';
+        }
+      }
+
+      if (impactExpenseLabel) impactExpenseLabel.textContent = `${Math.round(totalCost).toLocaleString('fr-FR')} FCFA`;
+      if (impactStockLabel) impactStockLabel.textContent = `+${producedKg.toFixed(1)} kg`;
+    }
+
+    function createRow(name, qty, unit, cost, isPurchased = true, desc = '') {
+      const tr = document.createElement('tr');
+      tr.className = 'prep-item-row';
+      const defaultDesc = desc || (unit.toLowerCase().includes('kg') ? `${qty} kg` : (unit.toLowerCase().includes('l') ? `${qty} L` : `1 sachet / bidon`));
+      const defaultCost = cost > 0 ? Math.round(cost) : (name.toLowerCase().includes('lysine') || name.toLowerCase().includes('métho') ? 5000 : '');
+
+      tr.innerHTML = `
+        <td>
+          <input type="text" name="item_name[]" class="form-control form-control-sm fw-semibold" value="${name || ''}" placeholder="Ingrédient" required>
+        </td>
+        <td>
+          <div class="input-group input-group-sm">
+            <input type="number" step="0.001" min="0" name="item_recipe_qty[]" class="form-control" value="${qty || ''}" placeholder="Quantité">
+            <input type="text" name="item_recipe_unit[]" class="form-control" style="max-width: 65px;" value="${unit || 'kg'}" placeholder="Unité">
+          </div>
+        </td>
+        <td class="text-center">
+          <div class="form-check form-switch d-inline-flex align-items-center gap-1">
+            <input type="hidden" name="item_purchased[]" class="item-purchased-hidden" value="${isPurchased ? '1' : '0'}">
+            <input class="form-check-input purchased-toggle" type="checkbox" role="switch" ${isPurchased ? 'checked' : ''}>
+            <span class="status-badge app-badge ${isPurchased ? 'badge-success-soft' : 'badge-neutral-soft'} py-0 px-2" style="font-size: 0.72rem;">
+              ${isPurchased ? 'Acheté' : 'En réserve (0 F)'}
+            </span>
+          </div>
+        </td>
+        <td>
+          <input type="text" name="item_desc[]" class="form-control form-control-sm text-muted" value="${defaultDesc}" placeholder="ex: 1 sachet de 1kg, 2 bidons 1.5L...">
+        </td>
+        <td class="text-end">
+          <div class="input-group input-group-sm justify-content-end">
+            <input type="number" step="1" min="0" name="item_cost[]" class="form-control text-end fw-bold text-dark item-cost-input" value="${isPurchased ? defaultCost : '0'}" placeholder="0">
+            <span class="input-group-text">F</span>
+          </div>
+        </td>
+        <td class="text-center">
+          <button type="button" class="btn btn-sm btn-link text-danger p-0 remove-item-btn" title="Retirer">
+            <i class="bi bi-trash"></i>
+          </button>
+        </td>
+      `;
+
+      attachRowBehavior(tr);
+      return tr;
+    }
+
+    function attachRowBehavior(tr) {
+      const toggle = tr.querySelector('.purchased-toggle');
+      const hidden = tr.querySelector('.item-purchased-hidden');
+      const badge = tr.querySelector('.status-badge');
+      const costInput = tr.querySelector('.item-cost-input');
+      const removeBtn = tr.querySelector('.remove-item-btn');
+
+      if (toggle) {
+        toggle.addEventListener('change', function () {
+          if (this.checked) {
+            hidden.value = '1';
+            badge.textContent = 'Acheté';
+            badge.className = 'status-badge app-badge badge-success-soft py-0 px-2';
+            costInput.disabled = false;
+            if (costInput.dataset.previousValue) {
+              costInput.value = costInput.dataset.previousValue;
+            }
+          } else {
+            hidden.value = '0';
+            badge.textContent = 'En réserve (0 F)';
+            badge.className = 'status-badge app-badge badge-neutral-soft py-0 px-2';
+            costInput.dataset.previousValue = costInput.value;
+            costInput.value = '0';
+            costInput.disabled = true;
+          }
+          calculateLive();
+        });
+      }
+
+      if (removeBtn) {
+        removeBtn.addEventListener('click', function () {
+          tr.remove();
+          calculateLive();
+        });
+      }
+
+      tr.querySelectorAll('input').forEach(inp => {
+        inp.addEventListener('input', calculateLive);
+        inp.addEventListener('change', calculateLive);
+      });
+    }
+
+    function loadFormulaItems(formulaId) {
+      itemsBody.innerHTML = '';
+      const formula = FORMULAS_DATA[formulaId];
+      if (formula) {
+        if (feedTypeSelect && formula.feed_type) {
+          feedTypeSelect.value = formula.feed_type;
+        }
+        if (totalProducedInput && formula.target_total_kg) {
+          totalProducedInput.value = formula.target_total_kg;
+        }
+        if (refBagPriceInput && formula.commercial_bag_reference_price) {
+          refBagPriceInput.value = formula.commercial_bag_reference_price;
+        }
+
+        formula.items.forEach(item => {
+          let estimatedCost = 0;
+          if (item.default_unit_cost > 0) {
+            if (item.unit.toLowerCase().includes('kg') || item.unit.toLowerCase().includes('l')) {
+              estimatedCost = item.quantity * item.default_unit_cost;
+            } else {
+              estimatedCost = item.default_unit_cost;
+            }
+          }
+          const tr = createRow(item.name, item.quantity, item.unit, estimatedCost, true);
+          itemsBody.appendChild(tr);
+        });
+      } else {
+        // Default rows if no formula selected
+        const defaultList = [
+          { name: 'Maïs grain broyé', qty: 180, unit: 'kg', cost: 36000 },
+          { name: 'Tourteau de soja', qty: 60, unit: 'kg', cost: 36000 },
+          { name: 'Farine de poisson', qty: 30, unit: 'kg', cost: 13500 },
+          { name: 'Son de blé', qty: 18, unit: 'kg', cost: 3150 },
+          { name: 'Coquillage marin', qty: 6, unit: 'kg', cost: 1500 },
+          { name: 'Lysine', qty: 0.450, unit: 'kg (450g)', cost: 5000, desc: '1 sachet de 1 kg' },
+          { name: 'Méthionine', qty: 0.300, unit: 'kg (300g)', cost: 5000, desc: '1 sachet de 1 kg' },
+          { name: 'Prémix chair', qty: 0.750, unit: 'kg', cost: 2000 },
+          { name: 'Levure boulangère', qty: 0.500, unit: 'kg', cost: 1100 },
+          { name: 'Huile rouge', qty: 2.0, unit: 'L', cost: 2500, desc: '2 bidons de 1.5 L' },
+        ];
+        defaultList.forEach(item => {
+          itemsBody.appendChild(createRow(item.name, item.qty, item.unit, item.cost, true, item.desc || ''));
+        });
+      }
+      calculateLive();
+    }
+
+    if (formulaSelect) {
+      formulaSelect.addEventListener('change', function () {
+        loadFormulaItems(this.value);
+      });
+      // Initial load
+      loadFormulaItems(formulaSelect.value);
+    } else {
+      loadFormulaItems(null);
+    }
+
+    if (addBtn) {
+      addBtn.addEventListener('click', function () {
+        const tr = createRow('', 1, 'kg', 0, true, '');
+        itemsBody.appendChild(tr);
+        calculateLive();
+      });
+    }
+
+    [totalProducedInput, millingCostInput, refBagPriceInput, feedTypeSelect].forEach(el => {
+      if (el) {
+        el.addEventListener('input', calculateLive);
+        el.addEventListener('change', calculateLive);
+      }
+    });
+
+    calculateLive();
+  });
+</script>
+{% endblock %}

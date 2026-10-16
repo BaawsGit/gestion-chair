@@ -1,0 +1,310 @@
+{% extends 'base.html' %}
+{% block title %}Provende & Formules Alimentaires · Gestion Chair{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="page-header-info">
+    <div class="d-flex align-items-center gap-2">
+      <span class="page-tag"><i class="bi bi-sliders2 text-success"></i> NUTRITION & AUTONOMIE</span>
+    </div>
+    <h1 class="page-title">Provende Maison & Formulations</h1>
+    <p class="page-subtitle">
+      Concevez vos recettes alimentaires et enregistrez vos sessions de fabrication. Les décaissements réels sont comptabilisés et le stock produit est injecté directement en réserve.
+    </p>
+  </div>
+  <div class="page-header-actions">
+    <a class="btn-app-secondary" href="{% url 'feed-stock' %}">
+      <i class="bi bi-box-seam"></i>
+      <span>Voir les stocks</span>
+    </a>
+    {% if user.is_staff %}
+    <a class="btn-app-secondary" href="{% url 'feed-formula-create' %}">
+      <i class="bi bi-journal-plus"></i>
+      <span>Nouvelle formule</span>
+    </a>
+    <a class="btn-app-primary" href="{% url 'feed-preparation-create' %}">
+      <i class="bi bi-play-circle-fill"></i>
+      <span>Fabriquer un aliment</span>
+    </a>
+    {% endif %}
+  </div>
+</div>
+
+<!-- 4 Metrics Row: Global Savings & Production -->
+<div class="metrics-row mb-4">
+  <div class="kpi-card kpi-card-emerald">
+    <div class="kpi-top">
+      <span class="kpi-label">Provende fabriquée</span>
+      <div class="kpi-icon"><i class="bi bi-boxes"></i></div>
+    </div>
+    <div class="kpi-value text-success">{{ total_produced_kg|floatformat:1 }} <span class="fs-6 text-muted">kg</span></div>
+    <div class="kpi-footer text-muted small mt-2">
+      <i class="bi bi-check2-circle text-success me-1"></i> {{ preparations_count }} session(s) de fabrication
+    </div>
+  </div>
+
+  <div class="kpi-card">
+    <div class="kpi-top">
+      <span class="kpi-label">Décaissements réels</span>
+      <div class="kpi-icon bg-light text-primary"><i class="bi bi-cash-stack"></i></div>
+    </div>
+    <div class="kpi-value text-dark">{{ total_cost_spent|floatformat:0 }} <span class="fs-6 text-muted">FCFA</span></div>
+    <div class="kpi-footer text-muted small mt-2">
+      Total achats matières premières & broyage
+    </div>
+  </div>
+
+  <div class="kpi-card">
+    <div class="kpi-top">
+      <span class="kpi-label">Coût moyen / kg</span>
+      <div class="kpi-icon bg-light text-info"><i class="bi bi-calculator"></i></div>
+    </div>
+    <div class="kpi-value text-info">{{ avg_cost_per_kg|floatformat:0 }} <span class="fs-6 text-muted">F / kg</span></div>
+    <div class="kpi-footer text-muted small mt-2">
+      ≈ <strong>{{ avg_cost_bag|floatformat:0 }} FCFA</strong> le sac équivalent 50 kg
+    </div>
+  </div>
+
+  <div class="kpi-card">
+    <div class="kpi-top">
+      <span class="kpi-label">Économie vs sac usine</span>
+      <div class="kpi-icon bg-success-subtle text-success"><i class="bi bi-piggy-bank-fill"></i></div>
+    </div>
+    <div class="kpi-value text-success">+{{ total_savings|floatformat:0 }} <span class="fs-6 text-muted">FCFA</span></div>
+    <div class="kpi-footer text-muted small mt-2">
+      Par rapport au sac industriel du commerce
+    </div>
+  </div>
+</div>
+
+<!-- Section 1 : Formules types (Recettes) -->
+<div class="app-card mb-4">
+  <div class="card-header-clean">
+    <h2 class="card-title-clean">
+      <i class="bi bi-book-half"></i>
+      <span>Formules d'aliments enregistrées (Recettes)</span>
+    </h2>
+    {% if user.is_staff %}
+    <a class="btn-app-secondary py-1 px-3 fs-7" href="{% url 'feed-formula-create' %}">
+      <i class="bi bi-plus-lg"></i>
+      <span>Ajouter une recette</span>
+    </a>
+    {% endif %}
+  </div>
+
+  {% if formulas %}
+  <div class="row g-4">
+    {% for formula in formulas %}
+    <div class="col-lg-6">
+      <div class="border rounded-3 p-4 bg-white shadow-sm h-100 d-flex flex-column justify-content-between">
+        <div>
+          <div class="d-flex align-items-center justify-content-between mb-3">
+            <div>
+              <span class="app-badge {% if formula.feed_type == 'starter' %}badge-warning-soft{% elif formula.feed_type == 'grower' %}badge-success-soft{% else %}badge-info-soft{% endif %} mb-1">
+                {{ formula.get_feed_type_display }}
+              </span>
+              <h3 class="h5 fw-bold mb-1 text-dark">{{ formula.name }}</h3>
+              <div class="text-muted small">
+                Cible : <strong>{{ formula.target_total_kg|floatformat:0 }} kg</strong> par préparation
+                {% if formula.commercial_bag_reference_price %}
+                · Réf sac usine : {{ formula.commercial_bag_reference_price|floatformat:0 }} F
+                {% endif %}
+              </div>
+            </div>
+            {% if user.is_staff %}
+            <div class="d-flex gap-2">
+              <a class="btn btn-sm btn-outline-secondary" href="{% url 'feed-formula-edit' formula.pk %}" title="Modifier">
+                <i class="bi bi-pencil"></i>
+              </a>
+              <a class="btn btn-sm btn-outline-danger" href="{% url 'feed-formula-delete' formula.pk %}" title="Supprimer">
+                <i class="bi bi-trash"></i>
+              </a>
+            </div>
+            {% endif %}
+          </div>
+
+          {% if formula.notes %}
+          <div class="p-2 mb-3 bg-light rounded text-muted small border-start border-3 border-success">
+            {{ formula.notes }}
+          </div>
+          {% endif %}
+
+          <div class="table-responsive mb-3">
+            <table class="table table-sm table-borderless small mb-0">
+              <thead class="text-muted text-uppercase" style="font-size: 0.7rem; border-bottom: 1px solid #e2e8f0;">
+                <tr>
+                  <th>Ingrédient</th>
+                  <th class="text-end">Quantité</th>
+                  <th class="text-end">Prix indicatif</th>
+                  <th class="text-end">Coût théorique</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for item in formula.items.all %}
+                <tr style="border-bottom: 1px dashed #f1f5f9;">
+                  <td class="fw-semibold text-dark">{{ item.ingredient_name }}</td>
+                  <td class="text-end">{{ item.quantity|floatformat:2 }} {{ item.unit }}</td>
+                  <td class="text-end text-muted">{{ item.default_unit_cost|floatformat:0 }} F</td>
+                  <td class="text-end fw-semibold text-secondary">{{ item.theoretical_cost|floatformat:0 }} F</td>
+                </tr>
+                {% empty %}
+                <tr>
+                  <td colspan="4" class="text-center text-muted py-2">Aucun ingrédient configuré.</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+              <tfoot style="border-top: 2px solid #e2e8f0;">
+                <tr class="fw-bold">
+                  <td>Total estimé théorique</td>
+                  <td class="text-end">{{ formula.target_total_kg|floatformat:0 }} kg</td>
+                  <td></td>
+                  <td class="text-end text-success">{{ formula.theoretical_total_cost|floatformat:0 }} FCFA</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+
+        <div class="pt-3 border-top d-flex align-items-center justify-content-between">
+          <div class="small text-muted">
+            Revient estimé : <strong class="text-dark">{{ formula.theoretical_cost_per_kg|floatformat:0 }} F/kg</strong>
+            (≈ {{ formula.theoretical_cost_per_50kg_bag|floatformat:0 }} F / sac 50kg)
+          </div>
+          {% if user.is_staff %}
+          <a class="btn-app-primary py-1 px-3 fs-7" href="{% url 'feed-preparation-create' %}?formula={{ formula.pk }}">
+            <i class="bi bi-play-fill"></i>
+            <span>Préparer ce lot</span>
+          </a>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="text-center py-5">
+    <i class="bi bi-journal-x fs-1 text-muted"></i>
+    <p class="text-muted mt-2">Aucune formule d'aliment créée pour l'instant.</p>
+    {% if user.is_staff %}
+    <a class="btn-app-primary" href="{% url 'feed-formula-create' %}">
+      <i class="bi bi-plus-lg"></i>
+      <span>Créer votre première formule</span>
+    </a>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+
+<!-- Section 2 : Historique des Fabrications & Sessions de Provende -->
+<div class="app-card">
+  <div class="card-header-clean">
+    <h2 class="card-title-clean">
+      <i class="bi bi-clock-history"></i>
+      <span>Historique des fabrications réalisées</span>
+    </h2>
+    {% if user.is_staff %}
+    <a class="btn-app-primary py-1 px-3 fs-7" href="{% url 'feed-preparation-create' %}">
+      <i class="bi bi-plus-lg"></i>
+      <span>Enregistrer une fabrication</span>
+    </a>
+    {% endif %}
+  </div>
+
+  {% if preparations %}
+  <div class="app-table-wrapper">
+    <table class="app-table">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Type d'aliment</th>
+          <th>Lot affecté</th>
+          <th>Formule / Recette</th>
+          <th class="text-end">Produit (kg)</th>
+          <th class="text-end">Décaissement réel</th>
+          <th class="text-end">Coût / kg</th>
+          <th class="text-end">Équiv. sac 50kg</th>
+          <th class="text-end">Économie</th>
+          <th class="text-end">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in preparations %}
+        <tr>
+          <td>
+            <div class="fw-bold">{{ p.date|date:'d/m/Y' }}</div>
+            <div class="small text-muted">{{ p.created_at|date:'H:i' }}</div>
+          </td>
+          <td>
+            <span class="app-badge {% if p.feed_type == 'starter' %}badge-warning-soft{% elif p.feed_type == 'grower' %}badge-success-soft{% else %}badge-info-soft{% endif %}">
+              {{ p.get_feed_type_display }}
+            </span>
+          </td>
+          <td>
+            {% if p.batch %}
+              <a href="{% url 'batch-report' p.batch.pk %}" class="fw-semibold text-success">
+                {{ p.batch.name }}
+              </a>
+            {% else %}
+              <span class="badge-neutral-soft px-2 py-1 small">Ferme générale</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if p.formula %}
+              <span class="fw-semibold text-dark">{{ p.formula.name }}</span>
+            {% else %}
+              <span class="text-muted fst-italic">Recette libre</span>
+            {% endif %}
+          </td>
+          <td class="text-end fw-bold text-success">
+            +{{ p.total_produced_kg|floatformat:1 }} kg
+          </td>
+          <td class="text-end fw-bold text-dark">
+            {{ p.total_cost|floatformat:0 }} FCFA
+          </td>
+          <td class="text-end text-muted">
+            {{ p.cost_per_kg|floatformat:0 }} F
+          </td>
+          <td class="text-end">
+            <span class="fw-semibold">{{ p.cost_per_50kg_bag|floatformat:0 }} F</span>
+          </td>
+          <td class="text-end">
+            {% if p.savings_amount > 0 %}
+            <span class="text-success fw-bold">
+              +{{ p.savings_amount|floatformat:0 }} F
+              <span class="small fw-normal">({{ p.savings_percent }}%)</span>
+            </span>
+            {% else %}
+            <span class="text-muted">-</span>
+            {% endif %}
+          </td>
+          <td class="text-end">
+            <div class="d-inline-flex gap-1">
+              <a class="btn btn-sm btn-outline-secondary" href="{% url 'feed-preparation-detail' p.pk %}" title="Fiche détaillée">
+                <i class="bi bi-eye"></i>
+              </a>
+              {% if user.is_staff %}
+              <a class="btn btn-sm btn-outline-danger" href="{% url 'feed-preparation-delete' p.pk %}" title="Supprimer">
+                <i class="bi bi-trash"></i>
+              </a>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="text-center py-5">
+    <i class="bi bi-boxes fs-1 text-muted"></i>
+    <p class="text-muted mt-2">Aucune préparation enregistrée pour le moment.</p>
+    {% if user.is_staff %}
+    <a class="btn-app-primary" href="{% url 'feed-preparation-create' %}">
+      <i class="bi bi-play-circle-fill"></i>
+      <span>Enregistrer votre première fabrication d'aliment</span>
+    </a>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

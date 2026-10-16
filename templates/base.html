@@ -80,6 +80,12 @@
             <span>Stocks</span>
           </a>
         </li>
+        <li>
+          <a class="topnav-link {% if 'feed-formula' in request.resolver_match.url_name or 'feed-preparation' in request.resolver_match.url_name %}active{% endif %}" href="{% url 'feed-formula-list' %}">
+            <i class="bi bi-sliders2"></i>
+            <span>Provende</span>
+          </a>
+        </li>
       </ul>
 
       <div class="nav-actions">
@@ -146,6 +152,17 @@
         navLinks.classList.toggle('show');
       });
     }
+
+    // Global Number & Currency Formatter (10 000 FCFA)
+    window.formatNumber = function (val) {
+      if (val === null || val === undefined || isNaN(val)) return '0';
+      const num = Math.round(Number(val));
+      return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+    };
+
+    window.formatFCFA = function (val) {
+      return window.formatNumber(val) + ' FCFA';
+    };
   </script>
   {% block scripts %}{% endblock %}
 </body>

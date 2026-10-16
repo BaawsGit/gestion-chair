@@ -1,0 +1,230 @@
+{% extends 'base.html' %}
+{% block title %}Fabrication du {{ prep.date|date:'d/m/Y' }} · Gestion Chair{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="page-header-info">
+    <div class="d-flex align-items-center gap-2">
+      <span class="page-tag"><i class="bi bi-file-earmark-check text-success"></i> FICHE DE FABRICATION</span>
+    </div>
+    <h1 class="page-title">Session du {{ prep.date|date:'d F Y' }} · {{ prep.get_feed_type_display }}</h1>
+    <p class="page-subtitle">
+      Récapitulatif de la provende préparée, des achats réels décaissés et de l'impact sur vos stocks.
+    </p>
+  </div>
+  <div class="page-header-actions">
+    <a class="btn-app-secondary" href="{% url 'feed-formula-list' %}">
+      <i class="bi bi-arrow-left"></i>
+      <span>Toutes les fabrications</span>
+    </a>
+    {% if user.is_staff %}
+    <a class="btn-app-danger" href="{% url 'feed-preparation-delete' prep.pk %}">
+      <i class="bi bi-trash"></i>
+      <span>Supprimer</span>
+    </a>
+    {% endif %}
+  </div>
+</div>
+
+<!-- 4 KPI Metrics Cards -->
+<div class="metrics-row mb-4">
+  <div class="kpi-card kpi-card-emerald">
+    <div class="kpi-top">
+      <span class="kpi-label">Stock produit & versé</span>
+      <div class="kpi-icon"><i class="bi bi-box-seam-fill"></i></div>
+    </div>
+    <div class="kpi-value text-success">+{{ prep.total_produced_kg|floatformat:1 }} <span class="fs-6 text-muted">kg</span></div>
+    <div class="kpi-footer text-muted small mt-2">
+      Aliment <strong>{{ prep.get_feed_type_display }}</strong> immédiatement disponible
+    </div>
+  </div>
+
+  <div class="kpi-card">
+    <div class="kpi-top">
+      <span class="kpi-label">Total décaissé en caisse</span>
+      <div class="kpi-icon bg-light text-dark"><i class="bi bi-wallet2"></i></div>
+    </div>
+    <div class="kpi-value text-dark">{{ prep.total_cost|floatformat:0 }} <span class="fs-6 text-muted">FCFA</span></div>
+    <div class="kpi-footer text-muted small mt-2">
+      Achats réels + meunier
+    </div>
+  </div>
+
+  <div class="kpi-card">
+    <div class="kpi-top">
+      <span class="kpi-label">Coût de revient réel</span>
+      <div class="kpi-icon bg-light text-info"><i class="bi bi-speedometer2"></i></div>
+    </div>
+    <div class="kpi-value text-info">{{ prep.cost_per_kg|floatformat:0 }} <span class="fs-6 text-muted">F / kg</span></div>
+    <div class="kpi-footer text-muted small mt-2">
+      Soit <strong>{{ prep.cost_per_50kg_bag|floatformat:0 }} FCFA</strong> le sac de 50 kg
+    </div>
+  </div>
+
+  <div class="kpi-card">
+    <div class="kpi-top">
+      <span class="kpi-label">Gain réalisé vs sac usine</span>
+      <div class="kpi-icon bg-success-subtle text-success"><i class="bi bi-piggy-bank-fill"></i></div>
+    </div>
+    <div class="kpi-value text-success">+{{ prep.savings_amount|floatformat:0 }} <span class="fs-6 text-muted">FCFA</span></div>
+    <div class="kpi-footer text-muted small mt-2">
+      Par rapport au sac commercial à {{ prep.commercial_bag_reference_price|floatformat:0 }} F
+    </div>
+  </div>
+</div>
+
+<!-- Synchronized Links Alert -->
+<div class="alert alert-success d-flex align-items-center justify-content-between p-3 rounded-3 shadow-sm mb-4">
+  <div class="d-flex align-items-center gap-3">
+    <div class="p-2 bg-success text-white rounded-circle fs-4">
+      <i class="bi bi-check2-circle"></i>
+    </div>
+    <div>
+      <h6 class="mb-1 fw-bold text-success">Synchronisation comptable et logistique active</h6>
+      <p class="mb-0 small text-dark">
+        Cette fabrication a généré <strong>1 dépense globale</strong> de <strong>{{ prep.total_cost|floatformat:0 }} FCFA</strong> et versé <strong>{{ prep.total_produced_kg|floatformat:1 }} kg</strong> dans votre stock.
+      </p>
+    </div>
+  </div>
+  <div class="d-flex gap-2">
+    {% if prep.expense %}
+    <a class="btn btn-sm btn-outline-success bg-white" href="{% url 'expense-edit' prep.expense.pk %}">
+      <i class="bi bi-wallet2 me-1"></i> Voir la dépense
+    </a>
+    {% endif %}
+    {% if prep.feed_inventory %}
+    <a class="btn btn-sm btn-outline-success bg-white" href="{% url 'feed-stock' %}">
+      <i class="bi bi-boxes me-1"></i> Voir dans les stocks
+    </a>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Details & Ingredients Breakdown -->
+<div class="row g-4">
+  <!-- Left Column: Information summary -->
+  <div class="col-lg-4">
+    <div class="app-card h-100">
+      <div class="card-header-clean">
+        <h2 class="card-title-clean">
+          <i class="bi bi-info-circle"></i>
+          <span>Paramètres de la session</span>
+        </h2>
+      </div>
+
+      <ul class="list-group list-group-flush small mb-3">
+        <li class="list-group-item d-flex justify-content-between px-0 py-2">
+          <span class="text-muted">Date de préparation</span>
+          <span class="fw-bold">{{ prep.date|date:'d/m/Y' }}</span>
+        </li>
+        <li class="list-group-item d-flex justify-content-between px-0 py-2">
+          <span class="text-muted">Stade d'aliment</span>
+          <span class="app-badge {% if prep.feed_type == 'starter' %}badge-warning-soft{% elif prep.feed_type == 'grower' %}badge-success-soft{% else %}badge-info-soft{% endif %}">
+            {{ prep.get_feed_type_display }}
+          </span>
+        </li>
+        <li class="list-group-item d-flex justify-content-between px-0 py-2">
+          <span class="text-muted">Lot bénéficiaire</span>
+          <span class="fw-bold text-success">
+            {% if prep.batch %}{{ prep.batch.name }}{% else %}Ferme générale{% endif %}
+          </span>
+        </li>
+        <li class="list-group-item d-flex justify-content-between px-0 py-2">
+          <span class="text-muted">Recette utilisée</span>
+          <span class="fw-semibold">
+            {% if prep.formula %}{{ prep.formula.name }}{% else %}Recette libre{% endif %}
+          </span>
+        </li>
+        <li class="list-group-item d-flex justify-content-between px-0 py-2">
+          <span class="text-muted">Frais de broyage / meunier</span>
+          <span class="fw-bold">{{ prep.milling_cost|floatformat:0 }} FCFA</span>
+        </li>
+        <li class="list-group-item d-flex justify-content-between px-0 py-2">
+          <span class="text-muted">Prix repère sac 50kg commerce</span>
+          <span>{{ prep.commercial_bag_reference_price|floatformat:0 }} FCFA</span>
+        </li>
+      </ul>
+
+      {% if prep.notes %}
+      <div class="p-3 bg-light rounded border small">
+        <strong class="d-block mb-1 text-muted">Notes & remarques :</strong>
+        {{ prep.notes|linebreaks }}
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Right Column: Ingredients Table -->
+  <div class="col-lg-8">
+    <div class="app-card h-100">
+      <div class="card-header-clean">
+        <h2 class="card-title-clean">
+          <i class="bi bi-list-stars"></i>
+          <span>Détail des ingrédients & Décaissements</span>
+        </h2>
+        <span class="text-muted small">{{ items|length }} matière(s) première(s)</span>
+      </div>
+
+      <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+          <thead class="table-light text-muted text-uppercase small">
+            <tr>
+              <th>Ingrédient</th>
+              <th>Dans le mélange</th>
+              <th class="text-center">Statut d'achat</th>
+              <th>Conditionnement acheté</th>
+              <th class="text-end">Montant décaissé</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in items %}
+            <tr>
+              <td class="fw-bold text-dark">{{ item.ingredient_name }}</td>
+              <td>
+                {% if item.recipe_quantity %}
+                  {{ item.recipe_quantity|floatformat:2 }} {{ item.recipe_unit }}
+                {% else %}
+                  <span class="text-muted">-</span>
+                {% endif %}
+              </td>
+              <td class="text-center">
+                {% if item.purchased_today %}
+                  <span class="app-badge badge-success-soft py-0 px-2" style="font-size: 0.72rem;">
+                    <i class="bi bi-cart-check-fill me-1"></i> Acheté
+                  </span>
+                {% else %}
+                  <span class="app-badge badge-neutral-soft py-0 px-2" style="font-size: 0.72rem;">
+                    <i class="bi bi-box2 me-1"></i> Pris sur réserve (0 F)
+                  </span>
+                {% endif %}
+              </td>
+              <td class="text-muted small">
+                {{ item.purchased_description|default:'-' }}
+              </td>
+              <td class="text-end fw-bold {% if item.purchase_cost > 0 %}text-dark{% else %}text-muted{% endif %}">
+                {{ item.purchase_cost|floatformat:0 }} FCFA
+              </td>
+            </tr>
+            {% endfor %}
+            {% if prep.milling_cost > 0 %}
+            <tr class="table-light">
+              <td class="fw-bold text-dark"><i class="bi bi-gear me-1"></i> Frais de mouture / broyeur</td>
+              <td class="text-muted">-</td>
+              <td class="text-center"><span class="app-badge badge-info-soft py-0 px-2" style="font-size: 0.72rem;">Service</span></td>
+              <td class="text-muted small">Prestation meunier</td>
+              <td class="text-end fw-bold text-dark">{{ prep.milling_cost|floatformat:0 }} FCFA</td>
+            </tr>
+            {% endif %}
+          </tbody>
+          <tfoot class="border-top-2">
+            <tr class="fw-bold fs-6">
+              <td colspan="4" class="text-end text-uppercase">Total Réel Décaissé :</td>
+              <td class="text-end text-success">{{ prep.total_cost|floatformat:0 }} FCFA</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

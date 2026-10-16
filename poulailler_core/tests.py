@@ -12,7 +12,11 @@ from .models import (
     Batch,
     Expense,
     FeedConsumption,
+    FeedFormula,
+    FeedFormulaItem,
     FeedInventory,
+    FeedPreparation,
+    FeedPreparationItem,
     FeedType,
     Mortality,
     ProphylaxisProgram,
@@ -225,6 +229,85 @@ class BatchWorkflowTests(TestCase):
         self.assertFalse(Mortality.objects.filter(batch=self.batch, date=entry_date).exists())
         self.assertFalse(FeedConsumption.objects.filter(batch=self.batch, date=entry_date).exists())
 
+    def test_daily_entry_multi_feed_transition_and_stock_shortage_notification(self):
+        user = get_user_model().objects.create_user(username="transition_user", password="password123", is_staff=True)
+        self.client.force_login(user)
+
+        # 1. Provide small starter stock (10 kg) and grower stock (20 kg)
+        FeedInventory.objects.create(
+            batch=self.batch,
+            feed_type=FeedType.STARTER,
+            purchase_date=self.start_date,
+            purchase_mode=FeedInventory.PurchaseMode.RETAIL,
+            quantity_kg=Decimal("10.00"),
+            unit_price=Decimal("400.00"),
+        )
+        FeedInventory.objects.create(
+            batch=self.batch,
+            feed_type=FeedType.GROWER,
+            purchase_date=self.start_date,
+            purchase_mode=FeedInventory.PurchaseMode.RETAIL,
+            quantity_kg=Decimal("20.00"),
+            unit_price=Decimal("400.00"),
+        )
+
+        entry_date = self.start_date + timedelta(days=5)
+
+        # 2. Record daily entry with multiple feeds on same day:
+        # Starter: 15 kg (which is > 10 kg available stock -> triggers stock shortage notification!)
+        # Grower: 12 kg (which is <= 20 kg available stock)
+        resp = self.client.post("/journal/", {
+            "date": entry_date.isoformat(),
+            "mortality_count": 0,
+            "starter_kg": "15.00",
+            "grower_kg": "12.00",
+        }, follow=True)
+
+        self.assertEqual(resp.status_code, 200)
+
+        # Verify warning message notification in response
+        messages_list = list(resp.context["messages"])
+        warning_messages = [m.message for m in messages_list if "Alerte stock" in m.message or "Stock insuffisant" in m.message]
+        self.assertTrue(len(warning_messages) >= 1)
+        self.assertIn("Démarrage", warning_messages[0])
+
+        # Verify database has TWO feed consumptions on this EXACT date for this batch
+        consumptions = FeedConsumption.objects.filter(batch=self.batch, date=entry_date).order_by("feed_type")
+        self.assertEqual(consumptions.count(), 2)
+
+        starter_c = consumptions.get(feed_type=FeedType.STARTER)
+        grower_c = consumptions.get(feed_type=FeedType.GROWER)
+        self.assertEqual(starter_c.kg_consumed, Decimal("15.00"))
+        self.assertEqual(grower_c.kg_consumed, Decimal("12.00"))
+
+        # 3. Check edit view loads both feeds
+        resp_edit = self.client.get(f"/journal/?date={entry_date.isoformat()}")
+        self.assertEqual(resp_edit.status_code, 200)
+        self.assertEqual(resp_edit.context["form"]["starter_kg"].value(), Decimal("15.00"))
+        self.assertEqual(resp_edit.context["form"]["grower_kg"].value(), Decimal("12.00"))
+
+    def test_expense_creation_medication_date_handling(self):
+        user = get_user_model().objects.create_user(username="vetuser", password="password123", is_staff=True)
+        self.client.force_login(user)
+
+        from .models import ExpenseCategory
+        cat_vet, _ = ExpenseCategory.objects.get_or_create(name="Vétérinaire / Médicaments")
+
+        today_str = timezone.localdate().isoformat()
+        resp = self.client.post("/depenses/nouvelle/", {
+            "batch": self.batch.pk,
+            "category": cat_vet.pk,
+            "date": today_str,
+            "designation": "Vaccin Gumboro",
+            "amount": "4500",
+        }, follow=True)
+
+        self.assertEqual(resp.status_code, 200)
+        expense = Expense.objects.filter(designation="Vaccin Gumboro").first()
+        self.assertIsNotNone(expense)
+        self.assertEqual(expense.amount, Decimal("4500.00"))
+        self.assertEqual(expense.category, cat_vet)
+
     def test_prophylaxis_daily_program_range_duplicate_and_clear(self):
         user = get_user_model().objects.create_user(username="proguser", password="password123", is_staff=True)
         self.client.force_login(user)
@@ -319,7 +402,7 @@ class BatchWorkflowTests(TestCase):
         # 4. Expense list displays this expense
         resp_expenses = self.client.get(f"/depenses/?batch={created_batch.pk}")
         self.assertEqual(resp_expenses.status_code, 200)
-        self.assertContains(resp_expenses, "350000")
+        self.assertContains(resp_expenses, "350\xa0000")
         self.assertContains(resp_expenses, "Poussins")
 
     def test_feed_purchase_creates_and_syncs_expense(self):
@@ -355,13 +438,13 @@ class BatchWorkflowTests(TestCase):
         # 4. Verify Expense appears in Dépenses view
         resp_exp = self.client.get("/depenses/")
         self.assertEqual(resp_exp.status_code, 200)
-        self.assertContains(resp_exp, "90000")
+        self.assertContains(resp_exp, "90\xa0000")
         self.assertContains(resp_exp, "Aliment")
 
         # 5. Verify Stocks view displays purchase with linked expense
         resp_stocks = self.client.get("/stocks/")
         self.assertEqual(resp_stocks.status_code, 200)
-        self.assertContains(resp_stocks, "90000")
+        self.assertContains(resp_stocks, "90\xa0000")
         self.assertContains(resp_stocks, "Liée")
 
         # 6. Verify Dashboard displays this expense in direct costs
@@ -462,6 +545,192 @@ class BatchWorkflowTests(TestCase):
             "unit_price": "3000.00",
         })
         self.assertFalse(Sale.objects.filter(quantity_sold=20).exists())
+
+    def test_feed_purchase_retail_mode_creates_stock_and_expense(self):
+        user = get_user_model().objects.create_user(username="retail_admin", password="password123", is_staff=True)
+        self.client.force_login(user)
+
+        # 1. Add 10 kg at 1,000 FCFA/kg = 10,000 FCFA
+        resp = self.client.post("/stocks/aliments/ajouter/", {
+            "batch": self.batch.pk,
+            "feed_type": FeedType.STARTER,
+            "purchase_date": timezone.localdate().isoformat(),
+            "purchase_mode": "retail",
+            "quantity_kg": "10.00",
+            "unit_price": "1000.00",
+            "supplier": "Boutique du Coin",
+            "notes": "10kg au détail",
+        })
+        self.assertEqual(resp.status_code, 302)
+
+        inventory = FeedInventory.objects.get(supplier="Boutique du Coin")
+        self.assertEqual(inventory.purchase_mode, FeedInventory.PurchaseMode.RETAIL)
+        self.assertEqual(inventory.quantity_kg, Decimal("10.00"))
+        self.assertEqual(inventory.total_weight_kg, Decimal("10.00"))
+        self.assertEqual(inventory.total_cost, Decimal("10000.00"))
+        self.assertIsNotNone(inventory.expense)
+
+        expense = inventory.expense
+        self.assertEqual(expense.amount, Decimal("10000.00"))
+        self.assertIn("10.0 kg", expense.designation)
+        self.assertIn("Boutique du Coin", expense.designation)
+
+        summary = FeedInventory.stock_summary()[FeedType.STARTER]
+        self.assertGreaterEqual(summary["remaining_kg"], Decimal("10.00"))
+
+    def test_expense_creation_with_aliment_syncs_to_stock_retail_and_bags(self):
+        from .models import ExpenseCategory
+        user = get_user_model().objects.create_user(username="exp_admin", password="password123", is_staff=True)
+        self.client.force_login(user)
+
+        cat_aliment, _ = ExpenseCategory.objects.get_or_create(name="Aliment", defaults={"useful_life_months": 1})
+
+        # Test retail sync from Dépenses
+        resp_retail = self.client.post("/depenses/nouvelle/", {
+            "batch": self.batch.pk,
+            "category": cat_aliment.pk,
+            "date": timezone.localdate().isoformat(),
+            "designation": "10kg aliment croissance au marché",
+            "amount": "10000.00",
+            "feed_type": FeedType.GROWER,
+            "feed_purchase_mode": "retail",
+            "feed_quantity_kg": "10.00",
+            "feed_supplier": "Marché central",
+        })
+        self.assertEqual(resp_retail.status_code, 302)
+
+        exp_retail = Expense.objects.get(designation="10kg aliment croissance au marché")
+        self.assertTrue(hasattr(exp_retail, "feed_inventory"))
+        inv_retail = exp_retail.feed_inventory
+        self.assertEqual(inv_retail.feed_type, FeedType.GROWER)
+        self.assertEqual(inv_retail.purchase_mode, "retail")
+        self.assertEqual(inv_retail.quantity_kg, Decimal("10.00"))
+        self.assertEqual(inv_retail.unit_price, Decimal("1000.00"))
+
+        summary_grower = FeedInventory.stock_summary()[FeedType.GROWER]
+        self.assertEqual(summary_grower["remaining_kg"], Decimal("10.00"))
+
+        # Test bags sync from Dépenses
+        resp_bags = self.client.post("/depenses/nouvelle/", {
+            "batch": self.batch.pk,
+            "category": cat_aliment.pk,
+            "date": timezone.localdate().isoformat(),
+            "designation": "2 sacs aliment finition",
+            "amount": "40000.00",
+            "feed_type": FeedType.FINISHER,
+            "feed_purchase_mode": "bags",
+            "feed_bags_purchased": 2,
+            "feed_bag_weight_kg": "50.00",
+            "feed_supplier": "Fournisseur Pro",
+        })
+        self.assertEqual(resp_bags.status_code, 302)
+
+        exp_bags = Expense.objects.get(designation="2 sacs aliment finition")
+        self.assertTrue(hasattr(exp_bags, "feed_inventory"))
+        inv_bags = exp_bags.feed_inventory
+        self.assertEqual(inv_bags.feed_type, FeedType.FINISHER)
+        self.assertEqual(inv_bags.bags_purchased, 2)
+        self.assertEqual(inv_bags.bag_weight_kg, Decimal("50.00"))
+        self.assertEqual(inv_bags.unit_price, Decimal("20000.00"))
+
+        summary_finisher = FeedInventory.stock_summary()[FeedType.FINISHER]
+        self.assertEqual(summary_finisher["remaining_kg"], Decimal("100.00"))
+
+        # Test expense deletion cleans up linked stock
+        resp_delete = self.client.post(f"/depenses/{exp_retail.pk}/supprimer/")
+        self.assertEqual(resp_delete.status_code, 302)
+        self.assertFalse(FeedInventory.objects.filter(pk=inv_retail.pk).exists())
+        self.assertEqual(FeedInventory.stock_summary()[FeedType.GROWER]["remaining_kg"], Decimal("0.00"))
+
+
+class FeedFormulationAndPreparationTests(TestCase):
+    def setUp(self):
+        User = get_user_model()
+        self.admin = User.objects.create_superuser("admin_prep", "admin@test.com", "pass1234")
+        self.client.force_login(self.admin)
+        self.batch = Batch.objects.create(
+            name="Lot Provende #1",
+            start_date=timezone.localdate() - timedelta(days=15),
+            initial_quantity=500,
+            unit_cost_chick=Decimal("500.00"),
+        )
+        self.formula = FeedFormula.objects.create(
+            name="Formule Test 300kg",
+            feed_type=FeedType.GROWER,
+            target_total_kg=Decimal("300.00"),
+            commercial_bag_reference_price=Decimal("18000.00"),
+        )
+        FeedFormulaItem.objects.create(formula=self.formula, ingredient_name="Maïs", quantity=Decimal("180"), unit="kg", default_unit_cost=Decimal("200"), order=1)
+        FeedFormulaItem.objects.create(formula=self.formula, ingredient_name="Soja", quantity=Decimal("60"), unit="kg", default_unit_cost=Decimal("600"), order=2)
+        FeedFormulaItem.objects.create(formula=self.formula, ingredient_name="Lysine", quantity=Decimal("0.450"), unit="kg", default_unit_cost=Decimal("5000"), order=3)
+
+    def test_formula_properties(self):
+        # 180*200 + 60*600 + 0.45*5000 = 36000 + 36000 + 2250 = 74250
+        self.assertEqual(self.formula.items.count(), 3)
+        self.assertEqual(self.formula.theoretical_total_cost, Decimal("74250.00"))
+        self.assertEqual(self.formula.theoretical_cost_per_kg, Decimal("247.50"))
+
+    def test_feed_preparation_creation_and_synchronization(self):
+        # Post preparation: Mais and Soja bought today, Lysine from existing stock (0 F)
+        post_data = {
+            "batch": self.batch.pk,
+            "formula": self.formula.pk,
+            "feed_type": FeedType.GROWER,
+            "date": timezone.localdate().isoformat(),
+            "total_produced_kg": "300.00",
+            "milling_cost": "1500.00",
+            "commercial_bag_reference_price": "18000.00",
+            "notes": "Session test provende",
+            # Items arrays
+            "item_name[]": ["Maïs", "Soja", "Lysine"],
+            "item_recipe_qty[]": ["180", "60", "0.450"],
+            "item_recipe_unit[]": ["kg", "kg", "kg"],
+            "item_purchased[]": ["1", "1", "0"],
+            "item_desc[]": ["180 kg", "60 kg", "Pris sur réserve existante"],
+            "item_cost[]": ["36000", "36000", "0"],
+        }
+        resp = self.client.post("/provende/preparer/", post_data)
+        self.assertEqual(resp.status_code, 302)
+
+        prep = FeedPreparation.objects.get(batch=self.batch)
+        # Total cost: 36000 + 36000 + 0 + 1500 = 73500 FCFA
+        self.assertEqual(prep.total_cost, Decimal("73500.00"))
+        self.assertEqual(prep.items.count(), 3)
+        self.assertEqual(prep.cost_per_kg, Decimal("245.00"))
+        self.assertEqual(prep.cost_per_50kg_bag, Decimal("12250.00"))
+
+        # Commercial equivalent = (300 / 50) * 18000 = 108000 FCFA
+        self.assertEqual(prep.commercial_cost_equivalent, Decimal("108000.00"))
+        # Savings = 108000 - 73500 = 34500 FCFA
+        self.assertEqual(prep.savings_amount, Decimal("34500.00"))
+
+        # Verify global expense created
+        self.assertIsNotNone(prep.expense)
+        exp = prep.expense
+        self.assertEqual(exp.amount, Decimal("73500.00"))
+        self.assertEqual(exp.category.name, "Aliment")
+        self.assertIn("Fabrication provende Croissance", exp.designation)
+
+        # Verify feed inventory created
+        self.assertIsNotNone(prep.feed_inventory)
+        inv = prep.feed_inventory
+        self.assertEqual(inv.quantity_kg, Decimal("300.00"))
+        self.assertEqual(inv.feed_type, FeedType.GROWER)
+
+        # Verify stock summary has +300 kg
+        stock = FeedInventory.stock_summary()[FeedType.GROWER]
+        self.assertEqual(stock["remaining_kg"], Decimal("300.00"))
+
+        # Verify deletion cascades cleanly
+        prep_pk = prep.pk
+        exp_pk = exp.pk
+        inv_pk = inv.pk
+        resp_del = self.client.post(f"/provende/preparations/{prep_pk}/supprimer/")
+        self.assertEqual(resp_del.status_code, 302)
+        self.assertFalse(FeedPreparation.objects.filter(pk=prep_pk).exists())
+        self.assertFalse(Expense.objects.filter(pk=exp_pk).exists())
+        self.assertFalse(FeedInventory.objects.filter(pk=inv_pk).exists())
+
 
 
 

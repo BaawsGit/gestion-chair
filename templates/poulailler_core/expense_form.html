@@ -1,0 +1,410 @@
+{% extends 'base.html' %}
+{% block title %}{{ title }} · Gestion Chair{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="page-header-info">
+    <div class="d-flex align-items-center gap-2">
+      <span class="page-tag"><i class="bi bi-wallet2 text-success"></i> COMPTABILITÉ & CHARGES</span>
+    </div>
+    <h1 class="page-title">{{ title }}</h1>
+    <p class="page-subtitle">
+      Enregistrez vos décaissements d'exploitation. Si la dépense concerne l'<strong>Aliment</strong>, le stock sera automatiquement mis à jour.
+    </p>
+  </div>
+  <div class="page-header-actions">
+    <a class="btn-app-secondary" href="{% url 'expense-list' %}">
+      <i class="bi bi-arrow-left"></i>
+      <span>Retour aux dépenses</span>
+    </a>
+  </div>
+</div>
+
+<form method="post" enctype="multipart/form-data" class="app-form-card" id="expenseForm" novalidate>
+  {% csrf_token %}
+
+  {% if form.errors %}
+  <div class="app-alert app-alert-danger mb-4" id="formErrorsContainer">
+    <i class="bi bi-exclamation-triangle-fill fs-5 text-danger"></i>
+    <div>
+      <div class="fw-bold">Veuillez renseigner correctement les champs requis :</div>
+      <ul class="mb-0 mt-1 ps-3">
+        {% for field, error_list in form.errors.items %}
+          {% for err in error_list %}
+            <li><strong>{{ field }} :</strong> {{ err }}</li>
+          {% endfor %}
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- 1. Informations de base de la dépense -->
+  <div class="row g-3 mb-3">
+    <div class="col-md-6">
+      <label class="form-label" for="{{ form.batch.id_for_label }}">
+        {{ form.batch.label }}
+      </label>
+      {{ form.batch }}
+      {% if form.batch.help_text %}
+        <div class="form-text"><i class="bi bi-info-circle me-1"></i> {{ form.batch.help_text }}</div>
+      {% endif %}
+      {% for error in form.batch.errors %}
+        <div class="form-errors"><i class="bi bi-exclamation-circle me-1"></i> {{ error }}</div>
+      {% endfor %}
+    </div>
+
+    <div class="col-md-6">
+      <label class="form-label" for="{{ form.category.id_for_label }}">
+        {{ form.category.label }} <span class="text-danger">*</span>
+      </label>
+      {{ form.category }}
+      <div class="form-text">
+        <i class="bi bi-magic me-1 text-success"></i> Sélectionnez <strong>Aliment</strong> pour répercuter automatiquement cet achat dans vos stocks disponibles.
+      </div>
+      {% for error in form.category.errors %}
+        <div class="form-errors"><i class="bi bi-exclamation-circle me-1"></i> {{ error }}</div>
+      {% endfor %}
+    </div>
+
+    <div class="col-md-4">
+      <label class="form-label" for="{{ form.date.id_for_label }}">
+        {{ form.date.label }} <span class="text-danger">*</span>
+      </label>
+      {{ form.date }}
+      {% for error in form.date.errors %}
+        <div class="form-errors"><i class="bi bi-exclamation-circle me-1"></i> {{ error }}</div>
+      {% endfor %}
+    </div>
+
+    <div class="col-md-8">
+      <label class="form-label" for="{{ form.designation.id_for_label }}">
+        {{ form.designation.label }} <span class="text-danger">*</span>
+      </label>
+      {{ form.designation }}
+      <div class="form-text">Ex: 10kg aliment démarrage, 2 sacs de 50kg finition, transport...</div>
+      {% for error in form.designation.errors %}
+        <div class="form-errors"><i class="bi bi-exclamation-circle me-1"></i> {{ error }}</div>
+      {% endfor %}
+    </div>
+
+    <div class="col-md-6">
+      <label class="form-label" for="{{ form.amount.id_for_label }}">
+        {{ form.amount.label }} (FCFA) <span class="text-danger">*</span>
+      </label>
+      {{ form.amount }}
+      {% for error in form.amount.errors %}
+        <div class="form-errors"><i class="bi bi-exclamation-circle me-1"></i> {{ error }}</div>
+      {% endfor %}
+    </div>
+
+    <div class="col-md-6">
+      <label class="form-label" for="{{ form.invoice_file.id_for_label }}">
+        {{ form.invoice_file.label }} (Optionnel)
+      </label>
+      {{ form.invoice_file }}
+      {% for error in form.invoice_file.errors %}
+        <div class="form-errors"><i class="bi bi-exclamation-circle me-1"></i> {{ error }}</div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- 2. Section Conditionnelle : Impact Stock Aliment -->
+  <div class="card border border-success rounded-3 p-4 mb-4 bg-light shadow-sm" id="feedStockSyncSection" style="display: none;">
+    <div class="d-flex align-items-center justify-content-between mb-3 border-bottom pb-2">
+      <h3 class="h6 mb-0 text-success fw-bold">
+        <i class="bi bi-box-seam me-2"></i>Impact sur le Stock d'Aliment (Synchronisation automatique)
+      </h3>
+      <span class="badge bg-success text-white px-2 py-1">
+        <i class="bi bi-check-circle-fill me-1"></i> Stock lié
+      </span>
+    </div>
+
+    <div class="row g-3">
+      <div class="col-md-6">
+        <label class="form-label fw-bold" for="id_feed_type">
+          Type d'aliment <span class="text-danger">*</span>
+        </label>
+        {{ form.feed_type }}
+        <div class="form-text">Indiquez si cet aliment est du Démarrage, Croissance ou Finition.</div>
+        {% for error in form.feed_type.errors %}
+          <div class="form-errors"><i class="bi bi-exclamation-circle me-1"></i> {{ error }}</div>
+        {% endfor %}
+      </div>
+
+      <div class="col-md-6">
+        <label class="form-label fw-bold" for="id_feed_purchase_mode">
+          Format d'achat <span class="text-danger">*</span>
+        </label>
+        {{ form.feed_purchase_mode }}
+        <div class="form-text">Acheté <strong>En sac(s)</strong> ou <strong>Au détail (en kg)</strong>.</div>
+        {% for error in form.feed_purchase_mode.errors %}
+          <div class="form-errors"><i class="bi bi-exclamation-circle me-1"></i> {{ error }}</div>
+        {% endfor %}
+      </div>
+
+      <!-- Mode Détail (kg) -->
+      <div class="col-12" id="feedRetailBlock" style="display: none;">
+        <div class="p-3 bg-white rounded border border-success">
+          <label class="form-label fw-semibold" for="id_feed_quantity_kg">
+            Quantité achetée au détail en kilogrammes (kg) <span class="text-danger">*</span>
+          </label>
+          {{ form.feed_quantity_kg }}
+          <div class="form-text">Ex: <strong>10</strong> pour 10 kg (si le montant total est 10 000 FCFA, le prix calculé sera de 1 000 FCFA / kg).</div>
+          {% for error in form.feed_quantity_kg.errors %}
+            <div class="form-errors"><i class="bi bi-exclamation-circle me-1"></i> {{ error }}</div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <!-- Mode Sacs -->
+      <div class="col-12" id="feedBagsBlock">
+        <div class="row g-3 p-3 bg-white rounded border">
+          <div class="col-md-6">
+            <label class="form-label fw-semibold" for="id_feed_bags_purchased">
+              Nombre de sacs <span class="text-danger">*</span>
+            </label>
+            {{ form.feed_bags_purchased }}
+            <div class="form-text">Ex: 1, 2, 4 sacs...</div>
+            {% for error in form.feed_bags_purchased.errors %}
+              <div class="form-errors"><i class="bi bi-exclamation-circle me-1"></i> {{ error }}</div>
+            {% endfor %}
+          </div>
+          <div class="col-md-6">
+            <label class="form-label fw-semibold" for="id_feed_bag_weight_kg">
+              Poids standard d'un sac (kg) <span class="text-danger">*</span>
+            </label>
+            {{ form.feed_bag_weight_kg }}
+            <div class="form-text">Ex: 50 kg (ou 25 kg, 100 kg)</div>
+            {% for error in form.feed_bag_weight_kg.errors %}
+              <div class="form-errors"><i class="bi bi-exclamation-circle me-1"></i> {{ error }}</div>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+
+      <div class="col-md-6">
+        <label class="form-label" for="id_feed_supplier">
+          Fournisseur d'aliment (Optionnel)
+        </label>
+        {{ form.feed_supplier }}
+        {% for error in form.feed_supplier.errors %}
+          <div class="form-errors"><i class="bi bi-exclamation-circle me-1"></i> {{ error }}</div>
+        {% endfor %}
+      </div>
+
+      <!-- Live Stock Preview -->
+      <div class="col-md-6">
+        <div class="p-3 bg-white rounded border h-100 d-flex flex-column justify-content-center">
+          <span class="text-uppercase small fw-bold text-success mb-1">
+            <i class="bi bi-arrow-up-right-circle me-1"></i> Répercussion sur le stock
+          </span>
+          <div class="fw-bold fs-6 text-dark" id="feedStockSummaryImpact">
+            Sélectionnez le type et la quantité d'aliment.
+          </div>
+          <div class="small text-muted mt-1" id="feedStockUnitPriceImpact">
+            Le coût unitaire sera calculé à partir du montant total.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="d-flex align-items-center gap-3 pt-3 border-top">
+    <button class="btn-app-primary" type="submit" id="submitExpenseBtn">
+      <i class="bi bi-check-lg"></i>
+      <span>{{ submit_label|default:'Enregistrer la dépense' }}</span>
+    </button>
+    <a class="btn-app-secondary" href="{% url 'expense-list' %}">
+      <span>Annuler</span>
+    </a>
+  </div>
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  document.addEventListener('DOMContentLoaded', function () {
+    const categorySelect = document.getElementById('id_category');
+    const syncSection = document.getElementById('feedStockSyncSection');
+    const modeSelect = document.getElementById('id_feed_purchase_mode');
+    const feedTypeSelect = document.getElementById('id_feed_type');
+
+    const blockBags = document.getElementById('feedBagsBlock');
+    const blockRetail = document.getElementById('feedRetailBlock');
+
+    const inputAmount = document.getElementById('id_amount');
+    const inputBags = document.getElementById('id_feed_bags_purchased');
+    const inputWeight = document.getElementById('id_feed_bag_weight_kg');
+    const inputQtyKg = document.getElementById('id_feed_quantity_kg');
+    const dateInput = document.getElementById('id_date');
+
+    const summaryImpact = document.getElementById('feedStockSummaryImpact');
+    const unitPriceImpact = document.getElementById('feedStockUnitPriceImpact');
+
+    // Auto-ensure date is filled if empty
+    if (dateInput && !dateInput.value) {
+      const today = new Date();
+      const yyyy = today.getFullYear();
+      const mm = String(today.getMonth() + 1).padStart(2, '0');
+      const dd = String(today.getDate()).padStart(2, '0');
+      dateInput.value = `${yyyy}-${mm}-${dd}`;
+    }
+
+    function isAlimentCategory() {
+      if (!categorySelect) return false;
+      const selectedOption = categorySelect.options[categorySelect.selectedIndex];
+      if (!selectedOption) return false;
+      const text = selectedOption.text.toLowerCase();
+      return text.includes('aliment');
+    }
+
+    function updateCategoryVisibility() {
+      const isAliment = isAlimentCategory();
+      if (syncSection) {
+        syncSection.style.display = isAliment ? 'block' : 'none';
+        const syncControls = syncSection.querySelectorAll('input, select, textarea');
+        syncControls.forEach(el => {
+          el.disabled = !isAliment;
+        });
+      }
+      updateModeDisplay();
+    }
+
+    function updateModeDisplay() {
+      const mode = modeSelect ? modeSelect.value : 'bags';
+      if (mode === 'retail') {
+        if (blockBags) blockBags.style.display = 'none';
+        if (blockRetail) blockRetail.style.display = 'block';
+      } else {
+        if (blockBags) blockBags.style.display = 'block';
+        if (blockRetail) blockRetail.style.display = 'none';
+      }
+      updateCalculations();
+    }
+
+    function updateCalculations() {
+      const mode = modeSelect ? modeSelect.value : 'bags';
+      const amount = parseFloat(inputAmount ? inputAmount.value : 0) || 0;
+      const feedTypeLabel = feedTypeSelect && feedTypeSelect.selectedIndex >= 0 ? 
+                            feedTypeSelect.options[feedTypeSelect.selectedIndex].text : '';
+
+      let totalKg = 0;
+      let unitPrice = 0;
+      let impactText = '';
+      let unitText = '';
+
+      if (mode === 'retail') {
+        const qty = parseFloat(inputQtyKg ? inputQtyKg.value : 0) || 0;
+        totalKg = qty;
+        if (qty > 0) {
+          unitPrice = amount / qty;
+          impactText = `+ ${qty.toFixed(1)} kg ajoutés au stock (${feedTypeLabel || 'Aliment'})`;
+          unitText = `Prix au détail calculé : ${window.formatFCFA ? window.formatFCFA(Math.round(unitPrice)) + ' / kg' : Math.round(unitPrice).toLocaleString('fr-FR') + ' FCFA / kg'}`;
+        }
+      } else {
+        const bags = parseFloat(inputBags ? inputBags.value : 0) || 0;
+        const weight = parseFloat(inputWeight ? inputWeight.value : 0) || 50;
+        totalKg = bags * weight;
+        if (bags > 0) {
+          unitPrice = amount / bags;
+          impactText = `+ ${totalKg.toFixed(1)} kg (${bags} sac(s) de ${weight} kg) ajoutés au stock`;
+          unitText = `Prix unitaire calculé : ${window.formatFCFA ? window.formatFCFA(Math.round(unitPrice)) + ' / sac' : Math.round(unitPrice).toLocaleString('fr-FR') + ' FCFA / sac'}`;
+        }
+      }
+
+      if (summaryImpact) {
+        summaryImpact.textContent = impactText || 'Renseignez les quantités ci-dessus.';
+      }
+      if (unitPriceImpact) {
+        unitPriceImpact.textContent = unitText || 'Le coût unitaire sera calculé à partir du montant total.';
+      }
+    }
+
+    if (categorySelect) {
+      categorySelect.addEventListener('change', updateCategoryVisibility);
+    }
+    if (modeSelect) {
+      modeSelect.addEventListener('change', updateModeDisplay);
+    }
+    if (feedTypeSelect) {
+      feedTypeSelect.addEventListener('change', updateCalculations);
+    }
+
+    [inputAmount, inputBags, inputWeight, inputQtyKg].forEach(el => {
+      if (el) {
+        el.addEventListener('input', updateCalculations);
+        el.addEventListener('change', updateCalculations);
+      }
+    });
+
+    // Auto-detect feed type from designation if not yet chosen
+    const designationInput = document.getElementById('id_designation');
+    if (designationInput && feedTypeSelect) {
+      designationInput.addEventListener('blur', function () {
+        if (!feedTypeSelect.value) {
+          const text = this.value.toLowerCase();
+          if (text.includes('démarrage') || text.includes('demarrage')) {
+            feedTypeSelect.value = 'starter';
+          } else if (text.includes('croissance')) {
+            feedTypeSelect.value = 'grower';
+          } else if (text.includes('finition')) {
+            feedTypeSelect.value = 'finisher';
+          }
+          updateCalculations();
+        }
+      });
+    }
+
+    // Direct submit button click validation & execution
+    const expenseForm = document.getElementById('expenseForm');
+    const submitBtn = document.getElementById('submitExpenseBtn');
+
+    if (expenseForm && submitBtn) {
+      submitBtn.addEventListener('click', function (e) {
+        const cat = document.getElementById('id_category');
+        const dt = document.getElementById('id_date');
+        const des = document.getElementById('id_designation');
+        const amt = document.getElementById('id_amount');
+
+        let missing = [];
+        [cat, dt, des, amt].forEach(el => {
+          if (el) el.classList.remove('is-invalid');
+        });
+
+        if (!cat || !cat.value) {
+          missing.push('Catégorie');
+          if (cat) cat.classList.add('is-invalid');
+        }
+        if (!dt || !dt.value) {
+          missing.push('Date');
+          if (dt) dt.classList.add('is-invalid');
+        }
+        if (!des || !des.value.trim()) {
+          missing.push('Désignation');
+          if (des) des.classList.add('is-invalid');
+        }
+        if (!amt || !amt.value || parseFloat(amt.value) <= 0) {
+          missing.push('Montant');
+          if (amt) amt.classList.add('is-invalid');
+        }
+
+        if (missing.length > 0) {
+          e.preventDefault();
+          e.stopPropagation();
+          alert('Veuillez compléter les informations obligatoires suivantes avant d\'enregistrer :\n• ' + missing.join('\n• '));
+          const firstInvalid = expenseForm.querySelector('.is-invalid');
+          if (firstInvalid) firstInvalid.focus();
+          return false;
+        }
+
+        // Visual feedback on button
+        submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span> Enregistrement en cours...';
+        // Allow the default form submission to proceed
+      });
+    }
+
+    updateCategoryVisibility();
+  });
+</script>
+{% endblock %}

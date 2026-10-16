@@ -101,6 +101,9 @@
           <th>Affectation</th>
           <th class="text-end">Montant</th>
           <th class="text-center">Justificatif</th>
+          {% if user.is_staff %}
+          <th class="text-end">Actions</th>
+          {% endif %}
         </tr>
       </thead>
       <tbody>
@@ -110,8 +113,13 @@
           <td class="fw-bold text-dark">
             {{ expense.designation }}
             {% if expense.feed_inventory %}
-              <a href="{% url 'feed-stock' %}" class="app-badge badge-success-soft text-decoration-none ms-1" title="Entrée de stock aliment">
-                <i class="bi bi-box-seam me-1"></i> Stock
+              <a href="{% url 'feed-stock' %}" class="badge bg-success-subtle text-success border border-success-subtle text-decoration-none ms-1" title="Voir dans les stocks">
+                <i class="bi bi-box-seam me-1"></i>
+                {% if expense.feed_inventory.purchase_mode == 'retail' %}
+                  Stock +{{ expense.feed_inventory.quantity_kg|floatformat:1 }} kg
+                {% else %}
+                  Stock +{{ expense.feed_inventory.bags_purchased }} sac{{ expense.feed_inventory.bags_purchased|pluralize }}
+                {% endif %}
               </a>
             {% endif %}
           </td>
@@ -150,6 +158,16 @@
               <span class="text-muted">—</span>
             {% endif %}
           </td>
+          {% if user.is_staff %}
+          <td class="text-end text-nowrap">
+            <a href="{% url 'expense-edit' expense.pk %}" class="btn btn-sm btn-outline-secondary py-0 px-2 me-1" title="Modifier cette dépense">
+              <i class="bi bi-pencil"></i>
+            </a>
+            <a href="{% url 'expense-delete' expense.pk %}" class="btn btn-sm btn-outline-danger py-0 px-2" title="Supprimer">
+              <i class="bi bi-trash"></i>
+            </a>
+          </td>
+          {% endif %}
         </tr>
         {% endfor %}
       </tbody>

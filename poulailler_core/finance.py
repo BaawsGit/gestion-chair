@@ -116,10 +116,24 @@ def sync_feed_inventory_expense(inventory):
             inventory.batch = active_batch
             FeedInventory.objects.filter(pk=inventory.pk).update(batch=active_batch)
 
-    total_amount = (Decimal(inventory.bags_purchased) * inventory.unit_price).quantize(CENT)
-    designation = f"Achat aliment {inventory.get_feed_type_display()} ({inventory.bags_purchased} sacs de {inventory.bag_weight_kg:.0f} kg)"
-    if inventory.supplier:
-        designation += f" - {inventory.supplier}"
+    if hasattr(inventory, "feed_preparation") and inventory.feed_preparation:
+        prep = inventory.feed_preparation
+        formula_name = prep.formula.name if prep.formula else "Recette personnalisée"
+        designation = f"Fabrication provende {prep.get_feed_type_display()} · {prep.total_produced_kg:,.0f} kg ({formula_name})"
+        total_amount = prep.total_cost
+    elif inventory.purchase_mode == FeedInventory.PurchaseMode.RETAIL:
+        total_amount = inventory.total_cost
+        qty = inventory.quantity_kg or Decimal("0.00")
+        designation = f"Achat aliment {inventory.get_feed_type_display()} au détail ({qty:.1f} kg à {inventory.unit_price:,.0f} F/kg)"
+        if inventory.supplier:
+            designation += f" - {inventory.supplier}"
+    else:
+        total_amount = inventory.total_cost
+        bags = inventory.bags_purchased or 0
+        weight = inventory.bag_weight_kg or Decimal("0.00")
+        designation = f"Achat aliment {inventory.get_feed_type_display()} ({bags} sacs de {weight:.0f} kg à {inventory.unit_price:,.0f} F/sac)"
+        if inventory.supplier:
+            designation += f" - {inventory.supplier}"
 
     if inventory.expense_id:
         try:

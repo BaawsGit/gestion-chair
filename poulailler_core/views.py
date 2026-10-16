@@ -1,6 +1,7 @@
 from functools import wraps
 from datetime import datetime, timedelta
 from decimal import Decimal
+import json
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -21,7 +22,9 @@ from .forms import (
     DailyEventForm,
     DailyMedicationForm,
     ExpenseForm,
+    FeedFormulaForm,
     FeedInventoryForm,
+    FeedPreparationForm,
     ProphylaxisProgramForm,
     SaleForm,
     TreatmentLogForm,
@@ -31,7 +34,12 @@ from .models import (
     Expense,
     ExpenseCategory,
     FeedConsumption,
+    FeedFormula,
+    FeedFormulaItem,
     FeedInventory,
+    FeedPreparation,
+    FeedPreparationItem,
+    FeedType,
     Mortality,
     ProphylaxisProgram,
     TreatmentLog,
@@ -129,10 +137,10 @@ def daily_entry(request):
         target_date = timezone.localdate()
 
     existing_mortality = Mortality.objects.filter(batch=batch, date=target_date).first()
-    existing_feed = FeedConsumption.objects.filter(batch=batch, date=target_date).first()
+    existing_feeds = list(FeedConsumption.objects.filter(batch=batch, date=target_date).order_by("feed_type"))
     administered_treatments = TreatmentLog.objects.filter(batch=batch, date_administered=target_date)
 
-    is_editing = bool(existing_mortality or existing_feed or administered_treatments.exists())
+    is_editing = bool(existing_mortality or existing_feeds or administered_treatments.exists())
 
     if request.method == "POST":
         if not (request.user.is_staff or request.user.is_superuser):
@@ -146,6 +154,14 @@ def daily_entry(request):
         if form.is_valid():
             data = form.cleaned_data
             entry_date = data["date"]
+
+            stock_summary = FeedInventory.stock_summary()
+            stock_warnings = []
+
+            prior_consumptions_map = {
+                fc.feed_type: fc for fc in FeedConsumption.objects.filter(batch=batch, date=entry_date)
+            }
+
             with transaction.atomic():
                 # 1. Mortality (Update or Create or Delete if 0)
                 count = data["mortality_count"] or 0
@@ -162,32 +178,83 @@ def daily_entry(request):
                 else:
                     Mortality.objects.filter(batch=batch, date=entry_date).delete()
 
-                # 2. Feed Consumption (Update or Create or Delete)
-                if data["feed_type"]:
-                    FeedConsumption.objects.update_or_create(
-                        batch=batch,
-                        date=entry_date,
-                        defaults={
-                            "feed_type": data["feed_type"],
-                            "bags_consumed": data["bags_consumed"],
-                            "kg_consumed": data["kg_consumed"],
-                        },
-                    )
-                else:
-                    FeedConsumption.objects.filter(batch=batch, date=entry_date).delete()
+                # 2. Multi-Feed Consumption
+                for ft, label in FeedType.choices:
+                    kg_val = data.get(f"{ft}_kg")
+                    bags_val = data.get(f"{ft}_bags")
+
+                    prior_fc = prior_consumptions_map.get(ft)
+                    prior_kg = Decimal("0.00")
+                    if prior_fc:
+                        if prior_fc.kg_consumed:
+                            prior_kg += prior_fc.kg_consumed
+                        elif prior_fc.bags_consumed:
+                            prior_kg += prior_fc.bags_consumed * Decimal("50.00")
+
+                    distributed_kg = Decimal("0.00")
+                    if kg_val and kg_val > 0:
+                        distributed_kg += Decimal(str(kg_val))
+                    if bags_val and bags_val > 0:
+                        distributed_kg += Decimal(str(bags_val)) * Decimal("50.00")
+
+                    remaining_in_stock = stock_summary.get(ft, {}).get("remaining_kg", Decimal("0.00"))
+                    available_for_entry = remaining_in_stock + prior_kg
+
+                    if distributed_kg > 0:
+                        # Stock shortage notification check
+                        if distributed_kg > available_for_entry:
+                            deficit = distributed_kg - available_for_entry
+                            stock_warnings.append(
+                                f"Alerte stock ({label}) : {distributed_kg:.1f} kg distribués alors que le stock disponible n'était que de {max(available_for_entry, Decimal('0.00')):.1f} kg (déficit de {deficit:.1f} kg). Pensez à enregistrer un réapprovisionnement."
+                            )
+
+                        if kg_val and kg_val > 0 and bags_val and bags_val > 0:
+                            FeedConsumption.objects.update_or_create(
+                                batch=batch,
+                                date=entry_date,
+                                feed_type=ft,
+                                defaults={
+                                    "bags_consumed": None,
+                                    "kg_consumed": distributed_kg.quantize(Decimal("0.01")),
+                                }
+                            )
+                        elif kg_val and kg_val > 0:
+                            FeedConsumption.objects.update_or_create(
+                                batch=batch,
+                                date=entry_date,
+                                feed_type=ft,
+                                defaults={
+                                    "bags_consumed": None,
+                                    "kg_consumed": Decimal(str(kg_val)).quantize(Decimal("0.01")),
+                                }
+                            )
+                        elif bags_val and bags_val > 0:
+                            FeedConsumption.objects.update_or_create(
+                                batch=batch,
+                                date=entry_date,
+                                feed_type=ft,
+                                defaults={
+                                    "bags_consumed": Decimal(str(bags_val)).quantize(Decimal("0.001")),
+                                    "kg_consumed": None,
+                                }
+                            )
+                    else:
+                        if prior_fc:
+                            prior_fc.delete()
 
                 # 3. Treatments
                 selected_treatments = data["treatments"]
-                # Unmark previous ones on this date not selected
                 TreatmentLog.objects.filter(batch=batch, date_administered=entry_date).exclude(
                     pk__in=[t.pk for t in selected_treatments]
                 ).update(is_completed=False, date_administered=None)
 
-                # Mark selected
                 for treatment in selected_treatments:
                     treatment.is_completed = True
                     treatment.date_administered = entry_date
                     treatment.save(update_fields=["is_completed", "date_administered"])
+
+            for warn_msg in stock_warnings:
+                messages.warning(request, f"⚠️ {warn_msg}")
 
             if is_editing:
                 messages.success(request, f"La saisie du {entry_date.strftime('%d/%m/%Y')} a été modifiée avec succès.")
@@ -200,14 +267,57 @@ def daily_entry(request):
             initial["mortality_count"] = existing_mortality.count
             initial["cause_suspected"] = existing_mortality.cause_suspected
             initial["mortality_notes"] = existing_mortality.notes
-        if existing_feed:
-            initial["feed_type"] = existing_feed.feed_type
-            initial["bags_consumed"] = existing_feed.bags_consumed
-            initial["kg_consumed"] = existing_feed.kg_consumed
+
+        for ef in existing_feeds:
+            if ef.feed_type == FeedType.STARTER:
+                if ef.kg_consumed:
+                    initial["starter_kg"] = ef.kg_consumed
+                if ef.bags_consumed:
+                    initial["starter_bags"] = ef.bags_consumed
+            elif ef.feed_type == FeedType.GROWER:
+                if ef.kg_consumed:
+                    initial["grower_kg"] = ef.kg_consumed
+                if ef.bags_consumed:
+                    initial["grower_bags"] = ef.bags_consumed
+            elif ef.feed_type == FeedType.FINISHER:
+                if ef.kg_consumed:
+                    initial["finisher_kg"] = ef.kg_consumed
+                if ef.bags_consumed:
+                    initial["finisher_bags"] = ef.bags_consumed
+
+        if existing_feeds:
+            f0 = existing_feeds[0]
+            initial["feed_type"] = f0.feed_type
+            initial["bags_consumed"] = f0.bags_consumed
+            initial["kg_consumed"] = f0.kg_consumed
+
         if administered_treatments.exists():
             initial["treatments"] = list(administered_treatments.values_list("pk", flat=True))
 
         form = DailyEventForm(initial=initial, batch=batch, target_date=target_date)
+
+    # Build stock summary per feed type for UI
+    stock_summary = FeedInventory.stock_summary()
+    feed_cards_data = []
+    for ft, label in FeedType.choices:
+        stock_item = stock_summary.get(ft, {"label": label, "remaining_kg": Decimal("0.00"), "remaining_bags": Decimal("0.00")})
+        existing_for_ft = next((ef for ef in existing_feeds if ef.feed_type == ft), None)
+        already_used = Decimal("0.00")
+        if existing_for_ft:
+            if existing_for_ft.kg_consumed:
+                already_used += existing_for_ft.kg_consumed
+            elif existing_for_ft.bags_consumed:
+                already_used += existing_for_ft.bags_consumed * Decimal("50.00")
+
+        effective_avail_kg = stock_item["remaining_kg"] + already_used
+        feed_cards_data.append({
+            "type": ft,
+            "label": label,
+            "remaining_kg": effective_avail_kg.quantize(Decimal("0.01")),
+            "remaining_bags": stock_item["remaining_bags"],
+            "field_kg": form[f"{ft}_kg"],
+            "field_bags": form[f"{ft}_bags"],
+        })
 
     # Build history entries for active batch
     all_dates = set(Mortality.objects.filter(batch=batch).values_list("date", flat=True))
@@ -217,14 +327,15 @@ def daily_entry(request):
     history_entries = []
     for d in sorted([d for d in all_dates if d is not None], reverse=True):
         m = Mortality.objects.filter(batch=batch, date=d).first()
-        f = FeedConsumption.objects.filter(batch=batch, date=d).first()
+        day_feeds = list(FeedConsumption.objects.filter(batch=batch, date=d).order_by("feed_type"))
         t_list = list(TreatmentLog.objects.filter(batch=batch, date_administered=d))
         age_d = max((d - batch.start_date).days + 1, 0)
         history_entries.append({
             "date": d,
             "age_days": age_d,
             "mortality": m,
-            "feed": f,
+            "feeds": day_feeds,
+            "feed": day_feeds[0] if day_feeds else None,
             "treatments": t_list,
             "is_selected": (d == target_date),
         })
@@ -238,6 +349,7 @@ def daily_entry(request):
         "day_age": day_age,
         "is_editing": is_editing,
         "history_entries": history_entries,
+        "feed_cards_data": feed_cards_data,
     })
 
 
@@ -686,10 +798,54 @@ def expense_list(request):
 def expense_create(request):
     form = ExpenseForm(request.POST or None, request.FILES or None)
     if request.method == "POST" and form.is_valid():
-        form.save()
-        messages.success(request, "Dépense enregistrée.")
+        expense = form.save()
+        if hasattr(expense, "feed_inventory") and expense.feed_inventory:
+            messages.success(request, f"Dépense enregistrée et stock d'aliment mis à jour ({expense.feed_inventory.get_feed_type_display()}).")
+        else:
+            messages.success(request, "Dépense enregistrée.")
         return redirect("expense-list")
-    return render(request, "poulailler_core/form_page.html", {"form": form, "title": "Nouvelle dépense", "submit_label": "Enregistrer"})
+    return render(request, "poulailler_core/expense_form.html", {
+        "form": form,
+        "title": "Nouvelle dépense",
+        "submit_label": "Enregistrer la dépense",
+    })
+
+
+@login_required
+@admin_required
+def expense_edit(request, pk):
+    expense = get_object_or_404(Expense, pk=pk)
+    form = ExpenseForm(request.POST or None, request.FILES or None, instance=expense)
+    if request.method == "POST" and form.is_valid():
+        expense = form.save()
+        if hasattr(expense, "feed_inventory") and expense.feed_inventory:
+            messages.success(request, f"Dépense modifiée et stock d'aliment synchronisé ({expense.feed_inventory.get_feed_type_display()}).")
+        else:
+            messages.success(request, "Dépense modifiée.")
+        return redirect("expense-list")
+    return render(request, "poulailler_core/expense_form.html", {
+        "form": form,
+        "expense": expense,
+        "title": "Modifier la dépense",
+        "submit_label": "Mettre à jour",
+    })
+
+
+@login_required
+@admin_required
+def expense_delete(request, pk):
+    expense = get_object_or_404(Expense, pk=pk)
+    if request.method == "POST":
+        if hasattr(expense, "feed_inventory") and expense.feed_inventory:
+            expense.feed_inventory.delete()
+        expense.delete()
+        messages.success(request, "Dépense supprimée et stock associé ajusté.")
+        return redirect("expense-list")
+    return render(request, "poulailler_core/confirm_delete.html", {
+        "title": "Supprimer la dépense",
+        "object_name": f"{expense.designation} ({expense.amount:,.0f} FCFA du {expense.date})",
+        "cancel_url": "/depenses/",
+    })
 
 
 @login_required
@@ -715,7 +871,11 @@ def feed_purchase(request):
         total_fcfa = inventory.total_cost
         messages.success(request, f"Réception de stock enregistrée et dépense de {total_fcfa:,.0f} FCFA comptabilisée avec succès.")
         return redirect("feed-stock")
-    return render(request, "poulailler_core/form_page.html", {"form": form, "title": "Réception d'aliment", "submit_label": "Ajouter au stock et comptabiliser"})
+    return render(request, "poulailler_core/feed_purchase_form.html", {
+        "form": form,
+        "title": "Réception d'aliment (Stock)",
+        "submit_label": "Ajouter au stock et comptabiliser",
+    })
 
 
 @login_required
@@ -728,10 +888,10 @@ def feed_purchase_edit(request, pk):
         sync_feed_inventory_expense(inventory)
         messages.success(request, f"Réception d'aliment et dépense associées mises à jour ({inventory.total_cost:,.0f} FCFA).")
         return redirect("feed-stock")
-    return render(request, "poulailler_core/form_page.html", {
+    return render(request, "poulailler_core/feed_purchase_form.html", {
         "form": form,
         "title": "Modifier la réception d'aliment",
-        "submit_label": "Mettre à jour",
+        "submit_label": "Mettre à jour le stock",
     })
 
 
@@ -746,9 +906,13 @@ def feed_purchase_delete(request, pk):
             expense.delete()
         messages.success(request, "Réception de stock et dépense associée supprimées.")
         return redirect("feed-stock")
+    if inventory.purchase_mode == inventory.PurchaseMode.RETAIL:
+        desc = f"{inventory.quantity_kg:.1f} kg au détail"
+    else:
+        desc = f"{inventory.bags_purchased} sac(s)"
     return render(request, "poulailler_core/confirm_delete.html", {
         "title": "Supprimer la réception d'aliment",
-        "object_name": f"{inventory.get_feed_type_display()} du {inventory.purchase_date} ({inventory.bags_purchased} sacs - {inventory.total_cost:,.0f} FCFA)",
+        "object_name": f"{inventory.get_feed_type_display()} du {inventory.purchase_date} ({desc} - {inventory.total_cost:,.0f} FCFA)",
         "cancel_url": "/stocks/",
     })
 
@@ -831,3 +995,353 @@ def batch_report(request, pk):
         "margin_per_bird": margin_per_bird,
         "close_confirmation": False,
     })
+
+
+# ==============================================================================
+# PROVENDE & FORMULATIONS ALIMENTAIRES (FABRICATION MAISON)
+# ==============================================================================
+
+@login_required
+def feed_formula_list(request):
+    """
+    Tableau de bord de la provenderie :
+    - Liste des formules actives (Croissance, Finition...) avec leurs ingrédients et coût théorique
+    - Historique des sessions de préparation d'aliments
+    - KPI globaux d'économies réalisées vs sacs industriels
+    """
+    formulas = FeedFormula.objects.prefetch_related("items").all()
+    preparations = FeedPreparation.objects.select_related("batch", "formula", "expense", "feed_inventory").order_by("-date", "-pk")
+
+    total_produced_kg = sum((p.total_produced_kg for p in preparations), Decimal("0.00"))
+    total_cost_spent = sum((p.total_cost for p in preparations), Decimal("0.00"))
+    total_savings = sum((p.savings_amount for p in preparations), Decimal("0.00"))
+    avg_cost_per_kg = (total_cost_spent / total_produced_kg).quantize(Decimal("0.01")) if total_produced_kg > 0 else Decimal("0.00")
+    avg_cost_bag = (avg_cost_per_kg * Decimal("50.00")).quantize(Decimal("0.01"))
+
+    return render(request, "poulailler_core/feed_formulas.html", {
+        "formulas": formulas,
+        "preparations": preparations,
+        "total_produced_kg": total_produced_kg,
+        "total_cost_spent": total_cost_spent,
+        "total_savings": total_savings,
+        "avg_cost_per_kg": avg_cost_per_kg,
+        "avg_cost_bag": avg_cost_bag,
+        "preparations_count": preparations.count(),
+    })
+
+
+@login_required
+@admin_required
+def feed_formula_create(request):
+    """Créer une nouvelle formule de provende avec ses ingrédients."""
+    form = FeedFormulaForm(request.POST or None)
+    if request.method == "POST" and form.is_valid():
+        with transaction.atomic():
+            formula = form.save()
+            names = request.POST.getlist("ingredient_name[]")
+            qtys = request.POST.getlist("quantity[]")
+            units = request.POST.getlist("unit[]")
+            costs = request.POST.getlist("default_unit_cost[]")
+
+            for order, (name, qty_str, unit, cost_str) in enumerate(zip(names, qtys, units, costs), start=1):
+                clean_name = (name or "").strip()
+                if not clean_name:
+                    continue
+                try:
+                    qty = Decimal(qty_str.replace(",", ".")) if qty_str else Decimal("0.00")
+                    cost = Decimal(cost_str.replace(",", ".")) if cost_str else Decimal("0.00")
+                except Exception:
+                    qty = Decimal("0.00")
+                    cost = Decimal("0.00")
+
+                if qty > 0:
+                    FeedFormulaItem.objects.create(
+                        formula=formula,
+                        ingredient_name=clean_name,
+                        quantity=qty,
+                        unit=unit.strip() or "kg",
+                        default_unit_cost=cost,
+                        order=order,
+                    )
+
+            messages.success(request, f"La formule « {formula.name} » ({formula.target_total_kg:,.0f} kg) a été enregistrée.")
+            return redirect("feed-formula-list")
+
+    return render(request, "poulailler_core/feed_formula_form.html", {
+        "form": form,
+        "title": "Nouvelle formule d'aliment",
+        "submit_label": "Enregistrer la formule",
+        "is_edit": False,
+        "formula": None,
+    })
+
+
+@login_required
+@admin_required
+def feed_formula_edit(request, pk):
+    """Modifier une formule existante et ses ingrédients."""
+    formula = get_object_or_404(FeedFormula.objects.prefetch_related("items"), pk=pk)
+    form = FeedFormulaForm(request.POST or None, instance=formula)
+    if request.method == "POST" and form.is_valid():
+        with transaction.atomic():
+            formula = form.save()
+            formula.items.all().delete()
+
+            names = request.POST.getlist("ingredient_name[]")
+            qtys = request.POST.getlist("quantity[]")
+            units = request.POST.getlist("unit[]")
+            costs = request.POST.getlist("default_unit_cost[]")
+
+            for order, (name, qty_str, unit, cost_str) in enumerate(zip(names, qtys, units, costs), start=1):
+                clean_name = (name or "").strip()
+                if not clean_name:
+                    continue
+                try:
+                    qty = Decimal(qty_str.replace(",", ".")) if qty_str else Decimal("0.00")
+                    cost = Decimal(cost_str.replace(",", ".")) if cost_str else Decimal("0.00")
+                except Exception:
+                    qty = Decimal("0.00")
+                    cost = Decimal("0.00")
+
+                if qty > 0:
+                    FeedFormulaItem.objects.create(
+                        formula=formula,
+                        ingredient_name=clean_name,
+                        quantity=qty,
+                        unit=unit.strip() or "kg",
+                        default_unit_cost=cost,
+                        order=order,
+                    )
+
+            messages.success(request, f"La formule « {formula.name} » a été mise à jour.")
+            return redirect("feed-formula-list")
+
+    return render(request, "poulailler_core/feed_formula_form.html", {
+        "form": form,
+        "title": f"Modifier la formule : {formula.name}",
+        "submit_label": "Mettre à jour la formule",
+        "is_edit": True,
+        "formula": formula,
+    })
+
+
+@login_required
+@admin_required
+def feed_formula_delete(request, pk):
+    """Supprimer une formule."""
+    formula = get_object_or_404(FeedFormula, pk=pk)
+    if request.method == "POST":
+        name = formula.name
+        formula.delete()
+        messages.success(request, f"La formule « {name} » a été supprimée.")
+        return redirect("feed-formula-list")
+
+    return render(request, "poulailler_core/confirm_delete.html", {
+        "title": f"Supprimer la formule « {formula.name} »",
+        "object_name": f"Formule {formula.name} ({formula.get_feed_type_display()} · {formula.target_total_kg:,.0f} kg)",
+        "cancel_url": "/provende/",
+    })
+
+
+@login_required
+@admin_required
+def feed_preparation_create(request, formula_id=None):
+    """
+    Session de préparation d'aliments :
+    - Saisie des ingrédients incorporés
+    - Déclaration de ce qui a réellement été acheté aujourd'hui vs ce qui est pris sur réserve existante (0 FCFA)
+    - Synchronisation automatique en 1 clic :
+        * Crée la Dépense globale (Catégorie Aliment)
+        * Alimente le Stock d'aliment (+X kg)
+        * Calcule le coût de revient / kg et l'économie réalisée vs sac industriel
+    """
+    selected_formula_id = formula_id or request.GET.get("formula")
+    initial_formula = None
+    if selected_formula_id:
+        initial_formula = FeedFormula.objects.filter(pk=selected_formula_id, is_active=True).first()
+
+    initial_data = {}
+    if initial_formula:
+        initial_data["formula"] = initial_formula
+        initial_data["feed_type"] = initial_formula.feed_type
+        initial_data["total_produced_kg"] = initial_formula.target_total_kg
+        initial_data["commercial_bag_reference_price"] = initial_formula.commercial_bag_reference_price
+
+    form = FeedPreparationForm(request.POST or None, initial=initial_data)
+
+    if request.method == "POST" and form.is_valid():
+        prep = form.save(commit=False)
+        milling_cost = prep.milling_cost or Decimal("0.00")
+
+        names = request.POST.getlist("item_name[]")
+        recipe_qtys = request.POST.getlist("item_recipe_qty[]")
+        recipe_units = request.POST.getlist("item_recipe_unit[]")
+        purchased_flags = request.POST.getlist("item_purchased[]")
+        descriptions = request.POST.getlist("item_desc[]")
+        costs = request.POST.getlist("item_cost[]")
+
+        items_to_create = []
+        total_items_cost = Decimal("0.00")
+
+        for idx, name in enumerate(names):
+            clean_name = (name or "").strip()
+            if not clean_name:
+                continue
+
+            qty_str = recipe_qtys[idx] if idx < len(recipe_qtys) else "0"
+            unit = recipe_units[idx] if idx < len(recipe_units) else "kg"
+            desc = descriptions[idx] if idx < len(descriptions) else ""
+            cost_str = costs[idx] if idx < len(costs) else "0"
+
+            is_purchased = True
+            if idx < len(purchased_flags):
+                is_purchased = purchased_flags[idx] in ("1", "true", "True", "on")
+
+            try:
+                recipe_qty = Decimal(qty_str.replace(",", ".")) if qty_str else Decimal("0.00")
+            except Exception:
+                recipe_qty = Decimal("0.00")
+
+            try:
+                purchase_cost = Decimal(cost_str.replace(",", ".")) if (is_purchased and cost_str) else Decimal("0.00")
+            except Exception:
+                purchase_cost = Decimal("0.00")
+
+            if not is_purchased:
+                purchase_cost = Decimal("0.00")
+
+            total_items_cost += purchase_cost
+
+            items_to_create.append({
+                "ingredient_name": clean_name,
+                "recipe_quantity": recipe_qty,
+                "recipe_unit": unit.strip() or "kg",
+                "purchased_today": is_purchased,
+                "purchased_description": desc.strip(),
+                "purchase_cost": purchase_cost,
+                "order": idx + 1,
+            })
+
+        total_spent = total_items_cost + milling_cost
+        prep.total_cost = total_spent
+
+        with transaction.atomic():
+            prep.save()
+
+            for item_data in items_to_create:
+                FeedPreparationItem.objects.create(
+                    preparation=prep,
+                    **item_data
+                )
+
+            cat_feed, _ = ExpenseCategory.objects.get_or_create(
+                name="Aliment",
+                defaults={"is_investment": False, "useful_life_months": 1}
+            )
+            formula_label = prep.formula.name if prep.formula else "Provende maison"
+            expense_designation = f"Fabrication provende {prep.get_feed_type_display()} · {prep.total_produced_kg:,.0f} kg ({formula_label})"
+
+            expense = Expense.objects.create(
+                batch=prep.batch,
+                category=cat_feed,
+                date=prep.date,
+                designation=expense_designation,
+                amount=prep.total_cost if prep.total_cost > 0 else Decimal("0.01"),
+            )
+
+            unit_price_calc = (prep.total_cost / prep.total_produced_kg).quantize(Decimal("0.01")) if prep.total_produced_kg > 0 else Decimal("0.01")
+            feed_inv = FeedInventory(
+                batch=prep.batch,
+                expense=expense,
+                feed_type=prep.feed_type,
+                purchase_mode=FeedInventory.PurchaseMode.RETAIL,
+                purchase_date=prep.date,
+                quantity_kg=prep.total_produced_kg,
+                unit_price=unit_price_calc if unit_price_calc > 0 else Decimal("0.01"),
+                supplier="Provenderie ferme (Fabrication maison)",
+                notes=f"Session du {prep.date} · Formule : {formula_label}",
+            )
+            feed_inv._skip_sync_signal = True
+            feed_inv.save()
+
+            prep.expense = expense
+            prep.feed_inventory = feed_inv
+            prep.save(update_fields=["expense", "feed_inventory"])
+
+        messages.success(
+            request,
+            f"Aliment fabriqué avec succès ! +{prep.total_produced_kg:,.0f} kg de {prep.get_feed_type_display()} versés au stock. "
+            f"Dépense réelle de {prep.total_cost:,.0f} FCFA comptabilisée (Coût : {prep.cost_per_kg:,.0f} F/kg · "
+            f"Économie estimée : {prep.savings_amount:,.0f} FCFA)."
+        )
+        return redirect("feed-preparation-detail", pk=prep.pk)
+
+    formulas_qs = FeedFormula.objects.filter(is_active=True).prefetch_related("items")
+    formulas_dict = {}
+    for f in formulas_qs:
+        formulas_dict[str(f.pk)] = {
+            "id": f.pk,
+            "name": f.name,
+            "feed_type": f.feed_type,
+            "target_total_kg": float(f.target_total_kg),
+            "commercial_bag_reference_price": float(f.commercial_bag_reference_price),
+            "items": [
+                {
+                    "name": item.ingredient_name,
+                    "quantity": float(item.quantity),
+                    "unit": item.unit,
+                    "default_unit_cost": float(item.default_unit_cost),
+                }
+                for item in f.items.all()
+            ]
+        }
+
+    return render(request, "poulailler_core/feed_preparation_form.html", {
+        "form": form,
+        "initial_formula": initial_formula,
+        "formulas_json": json.dumps(formulas_dict),
+        "title": "Nouvelle fabrication d'aliment · Provende maison",
+    })
+
+
+@login_required
+def feed_preparation_detail(request, pk):
+    """Fiche détaillée d'une session de fabrication d'aliments."""
+    prep = get_object_or_404(
+        FeedPreparation.objects.select_related("batch", "formula", "expense", "feed_inventory").prefetch_related("items"),
+        pk=pk
+    )
+    return render(request, "poulailler_core/feed_preparation_detail.html", {
+        "prep": prep,
+        "items": prep.items.all(),
+    })
+
+
+@login_required
+@admin_required
+def feed_preparation_delete(request, pk):
+    """Supprimer une préparation et nettoyer la dépense et le stock créés."""
+    prep = get_object_or_404(FeedPreparation, pk=pk)
+    if request.method == "POST":
+        date_str = prep.date
+        produced_kg = prep.total_produced_kg
+        feed_type_label = prep.get_feed_type_display()
+
+        with transaction.atomic():
+            inv_id = prep.feed_inventory_id
+            exp_id = prep.expense_id
+            prep.delete()
+            if inv_id:
+                FeedInventory.objects.filter(pk=inv_id).delete()
+            if exp_id:
+                Expense.objects.filter(pk=exp_id).delete()
+
+        messages.success(request, f"La fabrication du {date_str} ({produced_kg:,.0f} kg de {feed_type_label}) a été supprimée, avec annulation du stock et de la dépense associée.")
+        return redirect("feed-formula-list")
+
+    return render(request, "poulailler_core/confirm_delete.html", {
+        "title": f"Supprimer la fabrication du {prep.date}",
+        "object_name": f"Fabrication provende {prep.get_feed_type_display()} · {prep.total_produced_kg:,.0f} kg ({prep.total_cost:,.0f} FCFA)",
+        "cancel_url": f"/provende/preparations/{prep.pk}/",
+    })
+

@@ -10,7 +10,11 @@ from .models import (
     Batch,
     Expense,
     FeedConsumption,
+    FeedFormula,
+    FeedFormulaItem,
     FeedInventory,
+    FeedPreparation,
+    FeedPreparationItem,
     FeedType,
     Mortality,
     ProphylaxisProgram,
@@ -44,7 +48,7 @@ class BatchForm(StyledModelForm):
             "notes",
         ]
         widgets = {
-            "start_date": forms.DateInput(attrs={"type": "date"}),
+            "start_date": forms.DateInput(format="%Y-%m-%d", attrs={"type": "date"}),
             "ordered_quantity": forms.NumberInput(attrs={"min": "1", "step": "1", "id": "id_ordered_quantity"}),
             "bonus_quantity": forms.NumberInput(attrs={"min": "0", "step": "1", "id": "id_bonus_quantity"}),
             "unit_cost_chick": forms.NumberInput(attrs={"min": "0", "step": "0.01", "id": "id_unit_cost_chick"}),
@@ -65,6 +69,11 @@ class BatchForm(StyledModelForm):
             "target_duration_days": "Cycle habituel de ~45 jours pour du poulet de chair.",
         }
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if not self.instance.pk and "start_date" in self.fields and not self.initial.get("start_date"):
+            self.fields["start_date"].initial = timezone.localdate()
+
     def clean(self):
         cleaned_data = super().clean()
         ordered = cleaned_data.get("ordered_quantity") or 0
@@ -75,17 +84,182 @@ class BatchForm(StyledModelForm):
 
 
 class ExpenseForm(StyledModelForm):
+    feed_type = forms.ChoiceField(
+        label="Type d'aliment",
+        choices=[("", "Sélectionnez le type d'aliment..."), *FeedType.choices],
+        required=False,
+        widget=forms.Select(attrs={"class": "form-select", "id": "id_feed_type"}),
+        help_text="Spécifiez le type d'aliment pour impacter automatiquement le stock."
+    )
+    feed_purchase_mode = forms.ChoiceField(
+        label="Format d'achat de l'aliment",
+        choices=[("bags", "En sac(s)"), ("retail", "Au détail (en kg)")],
+        initial="bags",
+        required=False,
+        widget=forms.Select(attrs={"class": "form-select", "id": "id_feed_purchase_mode"}),
+    )
+    feed_quantity_kg = forms.DecimalField(
+        label="Quantité en kg (au détail)",
+        min_value=Decimal("0.01"),
+        max_digits=10,
+        decimal_places=2,
+        required=False,
+        widget=forms.NumberInput(attrs={"class": "form-control", "step": "0.1", "placeholder": "ex. 10", "id": "id_feed_quantity_kg"}),
+        help_text="Nombre de kilogrammes achetés (ex: 10 kg)."
+    )
+    feed_bags_purchased = forms.IntegerField(
+        label="Nombre de sacs",
+        min_value=1,
+        required=False,
+        widget=forms.NumberInput(attrs={"class": "form-control", "min": "1", "placeholder": "ex. 2", "id": "id_feed_bags_purchased"}),
+        help_text="Nombre de sacs achetés."
+    )
+    feed_bag_weight_kg = forms.DecimalField(
+        label="Poids par sac (kg)",
+        initial=Decimal("50.00"),
+        min_value=Decimal("0.01"),
+        max_digits=7,
+        decimal_places=2,
+        required=False,
+        widget=forms.NumberInput(attrs={"class": "form-control", "step": "0.5", "placeholder": "ex. 50 ou 25", "id": "id_feed_bag_weight_kg"}),
+        help_text="Poids standard du sac en kg."
+    )
+    feed_supplier = forms.CharField(
+        label="Fournisseur d'aliment",
+        max_length=120,
+        required=False,
+        widget=forms.TextInput(attrs={"class": "form-control", "placeholder": "Nom du fournisseur ou magasin", "id": "id_feed_supplier"})
+    )
+
     class Meta:
         model = Expense
         fields = ["batch", "category", "date", "designation", "amount", "invoice_file"]
-        widgets = {"date": forms.DateInput(attrs={"type": "date"})}
+        widgets = {
+            "date": forms.DateInput(format="%Y-%m-%d", attrs={"type": "date", "class": "form-control", "id": "id_date"}),
+            "category": forms.Select(attrs={"id": "id_category", "class": "form-select"}),
+            "designation": forms.TextInput(attrs={"id": "id_designation", "class": "form-control"}),
+            "amount": forms.NumberInput(attrs={"id": "id_amount", "class": "form-control", "step": "1"}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if "batch" in self.fields:
+            self.fields["batch"].empty_label = "Ferme générale (charges fixes)"
+            if not self.instance.pk and "initial" not in kwargs:
+                from .models import Batch
+                active_batch = Batch.objects.filter(status=Batch.Status.ACTIVE).first()
+                if active_batch:
+                    self.fields["batch"].initial = active_batch
+
+        if not self.instance.pk and "date" in self.fields and not self.initial.get("date"):
+            self.fields["date"].initial = timezone.localdate()
+
+        if self.instance.pk and hasattr(self.instance, "feed_inventory") and self.instance.feed_inventory:
+            inv = self.instance.feed_inventory
+            self.fields["feed_type"].initial = inv.feed_type
+            self.fields["feed_purchase_mode"].initial = inv.purchase_mode
+            self.fields["feed_quantity_kg"].initial = inv.quantity_kg
+            self.fields["feed_bags_purchased"].initial = inv.bags_purchased
+            self.fields["feed_bag_weight_kg"].initial = inv.bag_weight_kg
+            self.fields["feed_supplier"].initial = inv.supplier
+
+    def clean(self):
+        cleaned_data = super().clean()
+        category = cleaned_data.get("category")
+        amount = cleaned_data.get("amount")
+
+        is_feed = bool(category and "aliment" in category.name.lower())
+        if is_feed:
+            feed_type = cleaned_data.get("feed_type")
+            if not feed_type:
+                designation = (cleaned_data.get("designation") or "").lower()
+                if "démarrage" in designation or "demarrage" in designation:
+                    cleaned_data["feed_type"] = FeedType.STARTER
+                elif "croissance" in designation:
+                    cleaned_data["feed_type"] = FeedType.GROWER
+                elif "finition" in designation:
+                    cleaned_data["feed_type"] = FeedType.FINISHER
+                else:
+                    self.add_error("feed_type", "Pour la catégorie Aliment, veuillez sélectionner le type d'aliment (Démarrage, Croissance ou Finition) pour impacter le stock.")
+
+            mode = cleaned_data.get("feed_purchase_mode") or "bags"
+            if mode == "retail":
+                qty = cleaned_data.get("feed_quantity_kg")
+                if not qty or qty <= 0:
+                    self.add_error("feed_quantity_kg", "Veuillez renseigner le poids acheté en kg au détail (ex: 10 kg).")
+            else:
+                bags = cleaned_data.get("feed_bags_purchased")
+                weight = cleaned_data.get("feed_bag_weight_kg")
+                if not bags or bags <= 0:
+                    self.add_error("feed_bags_purchased", "Veuillez renseigner le nombre de sacs achetés.")
+                if not weight or weight <= 0:
+                    self.add_error("feed_bag_weight_kg", "Veuillez renseigner le poids par sac en kg (ex: 25 ou 50).")
+
+        return cleaned_data
+
+    def save(self, commit=True):
+        expense = super().save(commit=commit)
+        if commit:
+            self.sync_stock(expense)
+        return expense
+
+    def sync_stock(self, expense):
+        from .models import FeedInventory
+        category = expense.category
+        if category and "aliment" in category.name.lower() and self.cleaned_data.get("feed_type"):
+            feed_type = self.cleaned_data["feed_type"]
+            mode = self.cleaned_data.get("feed_purchase_mode") or "bags"
+            supplier = self.cleaned_data.get("feed_supplier") or ""
+
+            inv = getattr(expense, "feed_inventory", None)
+            if not inv:
+                inv = FeedInventory.objects.filter(expense=expense).first()
+            if not inv:
+                inv = FeedInventory(expense=expense)
+
+            inv.batch = expense.batch
+            inv.feed_type = feed_type
+            inv.purchase_date = expense.date
+            inv.purchase_mode = mode
+            inv.supplier = supplier
+
+            if mode == "retail":
+                qty = self.cleaned_data.get("feed_quantity_kg") or Decimal("1.00")
+                inv.quantity_kg = qty
+                inv.unit_price = (expense.amount / qty).quantize(Decimal("0.01"))
+                inv.bags_purchased = None
+                inv.bag_weight_kg = None
+            else:
+                bags = self.cleaned_data.get("feed_bags_purchased") or 1
+                weight = self.cleaned_data.get("feed_bag_weight_kg") or Decimal("50.00")
+                inv.bags_purchased = bags
+                inv.bag_weight_kg = weight
+                inv.unit_price = (expense.amount / Decimal(bags)).quantize(Decimal("0.01"))
+                inv.quantity_kg = None
+
+            inv._skip_sync_signal = True
+            inv.save()
+        else:
+            if hasattr(expense, "feed_inventory") and expense.feed_inventory:
+                expense.feed_inventory.delete()
 
 
 class FeedInventoryForm(StyledModelForm):
     class Meta:
         model = FeedInventory
-        fields = ["batch", "feed_type", "purchase_date", "bags_purchased", "bag_weight_kg", "unit_price", "supplier", "notes"]
-        widgets = {"purchase_date": forms.DateInput(attrs={"type": "date"})}
+        fields = [
+            "batch", "feed_type", "purchase_date", "purchase_mode",
+            "bags_purchased", "bag_weight_kg", "quantity_kg",
+            "unit_price", "supplier", "notes"
+        ]
+        widgets = {
+            "purchase_date": forms.DateInput(format="%Y-%m-%d", attrs={"type": "date", "class": "form-control"}),
+            "purchase_mode": forms.Select(attrs={"class": "form-select", "id": "id_purchase_mode"}),
+            "bags_purchased": forms.NumberInput(attrs={"class": "form-control", "min": "1", "placeholder": "ex. 2", "id": "id_bags_purchased"}),
+            "bag_weight_kg": forms.NumberInput(attrs={"class": "form-control", "step": "0.5", "placeholder": "ex. 50 ou 25", "id": "id_bag_weight_kg"}),
+            "quantity_kg": forms.NumberInput(attrs={"class": "form-control", "step": "0.1", "placeholder": "ex. 10", "id": "id_quantity_kg"}),
+            "unit_price": forms.NumberInput(attrs={"class": "form-control", "step": "1", "placeholder": "ex. 1000 ou 22500", "id": "id_unit_price"}),
+        }
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -97,12 +271,55 @@ class FeedInventoryForm(StyledModelForm):
                 if active_batch:
                     self.fields["batch"].initial = active_batch
 
+        self.fields["purchase_mode"].required = False
+        self.fields["purchase_mode"].initial = FeedInventory.PurchaseMode.BAGS
+        self.fields["bags_purchased"].required = False
+        self.fields["bag_weight_kg"].required = False
+        self.fields["quantity_kg"].required = False
+
+        if not self.instance.pk:
+            if not self.initial.get("purchase_date"):
+                self.fields["purchase_date"].initial = timezone.localdate()
+            if not self.initial.get("bag_weight_kg"):
+                self.fields["bag_weight_kg"].initial = Decimal("50.00")
+
+    def clean(self):
+        cleaned_data = super().clean()
+        mode = cleaned_data.get("purchase_mode") or FeedInventory.PurchaseMode.BAGS
+        cleaned_data["purchase_mode"] = mode
+        unit_price = cleaned_data.get("unit_price")
+
+        if not unit_price or unit_price <= 0:
+            self.add_error("unit_price", "Le prix unitaire doit être supérieur à zéro.")
+
+        if mode == FeedInventory.PurchaseMode.RETAIL:
+            qty = cleaned_data.get("quantity_kg")
+            if not qty or qty <= 0:
+                self.add_error("quantity_kg", "Renseignez la quantité en kg achetée au détail (ex: 10 kg).")
+            cleaned_data["bags_purchased"] = None
+            cleaned_data["bag_weight_kg"] = None
+        else:
+            bags = cleaned_data.get("bags_purchased")
+            weight = cleaned_data.get("bag_weight_kg")
+            if not bags or bags <= 0:
+                self.add_error("bags_purchased", "Renseignez le nombre de sacs achetés (ex: 2).")
+            if not weight or weight <= 0:
+                self.add_error("bag_weight_kg", "Renseignez le poids par sac en kg (ex: 25 ou 50).")
+            cleaned_data["quantity_kg"] = None
+
+        return cleaned_data
+
 
 class SaleForm(StyledModelForm):
     class Meta:
         model = Sale
         fields = ["batch", "date", "quantity_sold", "total_weight_kg", "unit_price", "total_amount", "customer_name", "payment_status", "notes"]
-        widgets = {"date": forms.DateInput(attrs={"type": "date"})}
+        widgets = {"date": forms.DateInput(format="%Y-%m-%d", attrs={"type": "date"})}
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if not self.instance.pk and "date" in self.fields and not self.initial.get("date"):
+            self.fields["date"].initial = timezone.localdate()
 
     def clean_quantity_sold(self):
         quantity = self.cleaned_data["quantity_sold"]
@@ -119,7 +336,7 @@ class SaleForm(StyledModelForm):
 class DailyEventForm(forms.Form):
     date = forms.DateField(
         label="Date", initial=timezone.localdate,
-        widget=forms.DateInput(attrs={"type": "date", "class": "form-control"})
+        widget=forms.DateInput(format="%Y-%m-%d", attrs={"type": "date", "class": "form-control"})
     )
     mortality_count = forms.IntegerField(
         label="Morts du jour", min_value=0, initial=0, required=False,
@@ -133,6 +350,34 @@ class DailyEventForm(forms.Form):
         label="Notes mortalité", required=False,
         widget=forms.Textarea(attrs={"class": "form-control", "rows": 2})
     )
+
+    # Multi-feed distribution fields
+    starter_kg = forms.DecimalField(
+        label="Démarrage (kg)", min_value=Decimal("0.00"), decimal_places=2,
+        required=False, widget=forms.NumberInput(attrs={"class": "form-control", "step": "0.1", "placeholder": "0.0", "id": "id_feed_starter_kg"})
+    )
+    starter_bags = forms.DecimalField(
+        label="Démarrage (sacs)", min_value=Decimal("0.000"), decimal_places=3,
+        required=False, widget=forms.NumberInput(attrs={"class": "form-control", "step": "0.01", "placeholder": "0.0", "id": "id_feed_starter_bags"})
+    )
+    grower_kg = forms.DecimalField(
+        label="Croissance (kg)", min_value=Decimal("0.00"), decimal_places=2,
+        required=False, widget=forms.NumberInput(attrs={"class": "form-control", "step": "0.1", "placeholder": "0.0", "id": "id_feed_grower_kg"})
+    )
+    grower_bags = forms.DecimalField(
+        label="Croissance (sacs)", min_value=Decimal("0.000"), decimal_places=3,
+        required=False, widget=forms.NumberInput(attrs={"class": "form-control", "step": "0.01", "placeholder": "0.0", "id": "id_feed_grower_bags"})
+    )
+    finisher_kg = forms.DecimalField(
+        label="Finition (kg)", min_value=Decimal("0.00"), decimal_places=2,
+        required=False, widget=forms.NumberInput(attrs={"class": "form-control", "step": "0.1", "placeholder": "0.0", "id": "id_feed_finisher_kg"})
+    )
+    finisher_bags = forms.DecimalField(
+        label="Finition (sacs)", min_value=Decimal("0.000"), decimal_places=3,
+        required=False, widget=forms.NumberInput(attrs={"class": "form-control", "step": "0.01", "placeholder": "0.0", "id": "id_feed_finisher_bags"})
+    )
+
+    # Legacy fields (maintained for backward-compatibility with tests / APIs)
     feed_type = forms.ChoiceField(
         label="Type d'aliment", choices=[("", "---------"), *FeedType.choices], required=False,
         widget=forms.Select(attrs={"class": "form-select"})
@@ -162,13 +407,30 @@ class DailyEventForm(forms.Form):
     def clean(self):
         cleaned = super().clean()
         count = cleaned.get("mortality_count") or 0
-        bags = cleaned.get("bags_consumed")
-        kilograms = cleaned.get("kg_consumed")
+
+        # Synchronize legacy fields with multi-feed fields
         feed_type = cleaned.get("feed_type")
-        if feed_type and (bags is None) == (kilograms is None):
-            raise ValidationError("Renseignez soit le nombre de sacs, soit le poids distribué en kg.")
-        if not feed_type and (bags is not None or kilograms is not None):
-            raise ValidationError("Choisissez un type d'aliment pour enregistrer la distribution.")
+        legacy_bags = cleaned.get("bags_consumed")
+        legacy_kg = cleaned.get("kg_consumed")
+
+        if feed_type:
+            if legacy_kg and not cleaned.get(f"{feed_type}_kg"):
+                cleaned[f"{feed_type}_kg"] = legacy_kg
+            if legacy_bags and not cleaned.get(f"{feed_type}_bags"):
+                cleaned[f"{feed_type}_bags"] = legacy_bags
+        else:
+            # If multi-feed fields are filled, set legacy fields to first active feed for backwards compatibility
+            for ft in [FeedType.STARTER, FeedType.GROWER, FeedType.FINISHER]:
+                kg = cleaned.get(f"{ft}_kg")
+                bags = cleaned.get(f"{ft}_bags")
+                if (kg and kg > 0) or (bags and bags > 0):
+                    cleaned["feed_type"] = ft
+                    if kg and kg > 0:
+                        cleaned["kg_consumed"] = kg
+                    elif bags and bags > 0:
+                        cleaned["bags_consumed"] = bags
+                    break
+
         if count > self.batch.current_stock:
             self.add_error("mortality_count", "Le nombre dépasse l'effectif vivant du lot.")
         if cleaned.get("treatments") and any(item.batch_id != self.batch.pk for item in cleaned["treatments"]):
@@ -265,7 +527,7 @@ class TreatmentLogForm(StyledModelForm):
             "notes": "Remarques",
         }
         widgets = {
-            "date_planned": forms.DateInput(attrs={"type": "date"}),
+            "date_planned": forms.DateInput(format="%Y-%m-%d", attrs={"type": "date"}),
             "target_day": forms.NumberInput(attrs={"min": "1", "max": "60"}),
             "notes": forms.Textarea(attrs={"rows": 2}),
         }
@@ -278,3 +540,62 @@ class TreatmentLogForm(StyledModelForm):
         if batch and target_day and not date_planned:
             cleaned["date_planned"] = batch.start_date + timedelta(days=target_day - 1)
         return cleaned
+
+
+class FeedFormulaForm(StyledModelForm):
+    class Meta:
+        model = FeedFormula
+        fields = ["name", "feed_type", "target_total_kg", "commercial_bag_reference_price", "notes", "is_active"]
+        widgets = {
+            "name": forms.TextInput(attrs={"class": "form-control", "placeholder": "ex. Formule Croissance Standard 300 kg"}),
+            "feed_type": forms.Select(attrs={"class": "form-select"}),
+            "target_total_kg": forms.NumberInput(attrs={"class": "form-control", "step": "1", "min": "1"}),
+            "commercial_bag_reference_price": forms.NumberInput(attrs={"class": "form-control", "step": "500", "min": "0"}),
+            "notes": forms.Textarea(attrs={"class": "form-control", "rows": 3, "placeholder": "Instructions particulières de broyage ou mélange..."}),
+            "is_active": forms.CheckboxInput(attrs={"class": "form-check-input"}),
+        }
+
+
+class FeedPreparationForm(StyledModelForm):
+    class Meta:
+        model = FeedPreparation
+        fields = [
+            "batch", "formula", "feed_type", "date",
+            "total_produced_kg", "milling_cost",
+            "commercial_bag_reference_price", "notes"
+        ]
+        widgets = {
+            "batch": forms.Select(attrs={"class": "form-select", "id": "id_prep_batch"}),
+            "formula": forms.Select(attrs={"class": "form-select", "id": "id_prep_formula"}),
+            "feed_type": forms.Select(attrs={"class": "form-select", "id": "id_prep_feed_type"}),
+            "date": forms.DateInput(format="%Y-%m-%d", attrs={"type": "date", "class": "form-control", "id": "id_prep_date"}),
+            "total_produced_kg": forms.NumberInput(attrs={"class": "form-control", "step": "0.5", "min": "1", "id": "id_prep_total_produced_kg"}),
+            "milling_cost": forms.NumberInput(attrs={"class": "form-control", "step": "100", "min": "0", "id": "id_prep_milling_cost", "placeholder": "0"}),
+            "commercial_bag_reference_price": forms.NumberInput(attrs={"class": "form-control", "step": "500", "min": "0", "id": "id_prep_ref_bag_price"}),
+            "notes": forms.Textarea(attrs={"class": "form-control", "rows": 2, "placeholder": "Observations sur la session..."}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if "batch" in self.fields:
+            self.fields["batch"].empty_label = "Ferme générale (sans lot spécifique)"
+            if not self.instance.pk and "initial" not in kwargs:
+                active_batch = Batch.objects.filter(status=Batch.Status.ACTIVE).first()
+                if active_batch:
+                    self.fields["batch"].initial = active_batch
+
+        if "formula" in self.fields:
+            self.fields["formula"].empty_label = "-- Sélectionner une formule enregistrée ou saisir librement --"
+            self.fields["formula"].required = False
+
+        if not self.instance.pk:
+            if not self.initial.get("date"):
+                self.fields["date"].initial = timezone.localdate()
+            if not self.initial.get("commercial_bag_reference_price"):
+                self.fields["commercial_bag_reference_price"] = forms.DecimalField(
+                    initial=Decimal("18000.00"),
+                    widget=forms.NumberInput(attrs={"class": "form-control", "step": "500", "min": "0", "id": "id_prep_ref_bag_price"})
+                )
+            if not self.initial.get("total_produced_kg"):
+                self.fields["total_produced_kg"].initial = Decimal("300.00")
+

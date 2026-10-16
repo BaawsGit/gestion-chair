@@ -28,6 +28,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "django.contrib.humanize",
     "poulailler_core.apps.PoulaillerCoreConfig",
 ]
 
@@ -54,6 +55,10 @@ TEMPLATES = [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
+            ],
+            "builtins": [
+                "poulailler_core.templatetags.app_filters",
+                "django.contrib.humanize.templatetags.humanize",
             ],
         },
     },
@@ -118,6 +123,9 @@ LANGUAGE_CODE = "fr-fr"
 TIME_ZONE = os.environ.get("DJANGO_TIME_ZONE", "UTC")
 USE_I18N = True
 USE_TZ = True
+USE_THOUSAND_SEPARATOR = True
+THOUSAND_SEPARATOR = " "
+NUMBER_GROUPING = 3
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_DIRS = [BASE_DIR / "static"]

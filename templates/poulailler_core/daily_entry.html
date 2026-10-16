@@ -119,41 +119,68 @@
     </div>
   </div>
 
-  <!-- 2. Alimentation distribuée -->
+  <!-- 2. Alimentation distribuée (Multi-aliments pour transition) -->
   <div class="mb-4 pb-4 border-bottom">
-    <div class="d-flex align-items-center gap-2 mb-3">
-      <div class="kpi-icon" style="background-color: var(--primary-50); color: var(--primary-600); width: 34px; height: 34px;">
-        <i class="bi bi-basket2"></i>
+    <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+      <div class="d-flex align-items-center gap-2">
+        <div class="kpi-icon" style="background-color: var(--primary-50); color: var(--primary-600); width: 34px; height: 34px;">
+          <i class="bi bi-basket2"></i>
+        </div>
+        <div>
+          <h3 class="fs-5 fw-bold mb-0 text-dark">Ration d'aliment distribuée</h3>
+          <p class="text-muted small mb-0">Renseignez les quantités distribuées ce jour. Possibilité de combiner plusieurs aliments (ex: transition Démarrage / Croissance).</p>
+        </div>
       </div>
-      <div>
-        <h3 class="fs-5 fw-bold mb-0 text-dark">Ration d'aliment distribuée</h3>
-        <p class="text-muted small mb-0">Consommation journalière déduite du stock disponible</p>
-      </div>
+      <span class="badge bg-light text-dark border">
+        <i class="bi bi-info-circle me-1 text-primary"></i> Multi-aliments le même jour supporté
+      </span>
     </div>
 
+    <!-- Feed Cards -->
     <div class="row g-3">
-      <div class="col-md-4">
-        <label class="form-label" for="id_feed_type">
-          <i class="bi bi-tag me-1 text-muted"></i> Type d'aliment
-        </label>
-        {{ form.feed_type }}
-      </div>
+      {% for card in feed_cards_data %}
+      <div class="col-lg-4 col-md-6">
+        <div class="card h-100 border shadow-sm rounded-3 p-3 bg-white feed-distribution-card" data-feed-type="{{ card.type }}" data-avail-kg="{{ card.remaining_kg }}">
+          <div class="d-flex align-items-center justify-content-between mb-2">
+            <span class="badge {% if card.type == 'starter' %}bg-primary{% elif card.type == 'grower' %}bg-warning text-dark{% else %}bg-success{% endif %} px-2 py-1 fs-6">
+              <i class="bi bi-tag-fill me-1"></i> {{ card.label }}
+            </span>
+            {% if card.remaining_kg > 0 %}
+              <span class="badge bg-success-subtle text-success border border-success-subtle" title="Stock disponible actuellement">
+                <i class="bi bi-box-seam me-1"></i> Dispo : <strong>{{ card.remaining_kg }} kg</strong>
+              </span>
+            {% else %}
+              <span class="badge bg-danger-subtle text-danger border border-danger-subtle">
+                <i class="bi bi-exclamation-triangle-fill me-1"></i> Épuisé (0 kg)
+              </span>
+            {% endif %}
+          </div>
 
-      <div class="col-md-4">
-        <label class="form-label" for="id_bags_consumed">
-          <i class="bi bi-box me-1 text-muted"></i> Sacs distribués
-        </label>
-        {{ form.bags_consumed }}
-        <div class="form-text">Ex: 1 ou 0.5 sac</div>
-      </div>
+          <div class="row g-2 mt-1">
+            <div class="col-7">
+              <label class="form-label small fw-semibold text-muted mb-1" for="{{ card.field_kg.id_for_label }}">
+                Kilogrammes (kg)
+              </label>
+              {{ card.field_kg }}
+              {{ card.field_kg.errors }}
+            </div>
+            <div class="col-5">
+              <label class="form-label small fw-semibold text-muted mb-1" for="{{ card.field_bags.id_for_label }}">
+                Ou en sacs
+              </label>
+              {{ card.field_bags }}
+              {{ card.field_bags.errors }}
+            </div>
+          </div>
 
-      <div class="col-md-4">
-        <label class="form-label" for="id_kg_consumed">
-          <i class="bi bi-speedometer me-1 text-muted"></i> Ou en Kilogrammes
-        </label>
-        {{ form.kg_consumed }}
-        <div class="form-text">Ex: 12.5 ou 25 kg</div>
+          <!-- Live Shortage Warning -->
+          <div id="stock-warning-{{ card.type }}" class="alert alert-warning py-1 px-2 small mt-2 mb-0 d-none" role="alert">
+            <i class="bi bi-exclamation-triangle-fill me-1 text-warning"></i>
+            <strong>Stock insuffisant :</strong> Demande <span class="entered-val fw-bold">0</span> kg > Stock <span class="avail-val fw-bold">{{ card.remaining_kg }}</span> kg (Déficit : <span class="deficit-val text-danger fw-bold">0</span> kg).
+          </div>
+        </div>
       </div>
+      {% endfor %}
     </div>
   </div>
 
@@ -249,12 +276,18 @@
             {% endif %}
           </td>
           <td>
-            {% if entry.feed %}
-              <div class="fw-semibold text-dark">{{ entry.feed.get_feed_type_display }}</div>
-              <div class="small text-muted">
-                {% if entry.feed.bags_consumed %}{{ entry.feed.bags_consumed }} sac(s){% endif %}
-                {% if entry.feed.kg_consumed %} • {{ entry.feed.kg_consumed }} kg{% endif %}
-              </div>
+            {% if entry.feeds %}
+              {% for f in entry.feeds %}
+                <div class="d-flex align-items-center gap-1 mb-1">
+                  <span class="badge {% if f.feed_type == 'starter' %}bg-primary{% elif f.feed_type == 'grower' %}bg-warning text-dark{% else %}bg-success{% endif %} py-1 px-2" style="font-size: 0.75rem;">
+                    {{ f.get_feed_type_display }}
+                  </span>
+                  <span class="small fw-semibold text-dark">
+                    {% if f.kg_consumed %}{{ f.kg_consumed }} kg{% endif %}
+                    {% if f.bags_consumed %}{{ f.bags_consumed }} sac(s){% endif %}
+                  </span>
+                </div>
+              {% endfor %}
             {% else %}
               <span class="text-muted small">—</span>
             {% endif %}
@@ -292,4 +325,51 @@
   </div>
   {% endif %}
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  document.addEventListener('DOMContentLoaded', function () {
+    const cards = document.querySelectorAll('.feed-distribution-card');
+
+    cards.forEach(card => {
+      const feedType = card.dataset.feedType;
+      const availKg = parseFloat(card.dataset.availKg) || 0;
+      const kgInput = card.querySelector(`#id_feed_${feedType}_kg`);
+      const bagsInput = card.querySelector(`#id_feed_${feedType}_bags`);
+      const warningBox = document.getElementById(`stock-warning-${feedType}`);
+
+      function checkStock() {
+        if (!warningBox) return;
+        const kgVal = parseFloat(kgInput ? kgInput.value : 0) || 0;
+        const bagsVal = parseFloat(bagsInput ? bagsInput.value : 0) || 0;
+        const totalKg = kgVal + (bagsVal * 50);
+
+        if (totalKg > 0 && totalKg > availKg) {
+          const deficit = totalKg - availKg;
+          warningBox.querySelector('.entered-val').textContent = totalKg.toFixed(1);
+          warningBox.querySelector('.avail-val').textContent = availKg.toFixed(1);
+          warningBox.querySelector('.deficit-val').textContent = deficit.toFixed(1);
+          warningBox.classList.remove('d-none');
+          card.classList.add('border-warning');
+        } else {
+          warningBox.classList.add('d-none');
+          card.classList.remove('border-warning');
+        }
+      }
+
+      if (kgInput) {
+        kgInput.addEventListener('input', checkStock);
+        kgInput.addEventListener('change', checkStock);
+      }
+      if (bagsInput) {
+        bagsInput.addEventListener('input', checkStock);
+        bagsInput.addEventListener('change', checkStock);
+      }
+
+      // Initial check
+      checkStock();
+    });
+  });
+</script>
 {% endblock %}

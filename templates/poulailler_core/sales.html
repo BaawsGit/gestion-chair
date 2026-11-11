@@ -122,6 +122,9 @@
           <th>Prix unitaire</th>
           <th class="text-end">Montant total</th>
           <th class="text-center">Statut de paiement</th>
+          {% if user.is_staff %}
+          <th class="text-end">Actions</th>
+          {% endif %}
         </tr>
       </thead>
       <tbody>
@@ -133,7 +136,12 @@
               <i class="bi bi-layers me-1"></i> {{ sale.batch.name }}
             </span>
           </td>
-          <td class="fw-bold text-dark">{{ sale.customer_name|default:'Vente comptoir' }}</td>
+          <td class="fw-bold text-dark">
+            {{ sale.customer_name|default:'Vente comptoir' }}
+            {% if sale.notes %}
+              <div class="small text-muted fw-normal">{{ sale.notes }}</div>
+            {% endif %}
+          </td>
           <td class="fw-bold text-success">{{ sale.quantity_sold }} sujets</td>
           <td>
             {% if sale.total_weight_kg %}
@@ -157,6 +165,16 @@
               </span>
             {% endif %}
           </td>
+          {% if user.is_staff %}
+          <td class="text-end text-nowrap">
+            <a href="{% url 'sale-edit' sale.pk %}" class="btn btn-sm btn-outline-secondary py-0 px-2 me-1" title="Modifier cette vente">
+              <i class="bi bi-pencil"></i>
+            </a>
+            <a href="{% url 'sale-delete' sale.pk %}" class="btn btn-sm btn-outline-danger py-0 px-2" title="Supprimer cette vente">
+              <i class="bi bi-trash"></i>
+            </a>
+          </td>
+          {% endif %}
         </tr>
         {% endfor %}
       </tbody>

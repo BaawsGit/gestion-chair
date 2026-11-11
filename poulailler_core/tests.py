@@ -824,6 +824,67 @@ class FeedFormulationAndPreparationTests(TestCase):
         resp_stock_edit = self.client.get(f"/stocks/aliments/{feed_inv.pk}/modifier/")
         self.assertRedirects(resp_stock_edit, f"/provende/preparations/{prep.pk}/modifier/")
 
+    def test_sale_create_edit_and_delete(self):
+        # 1. Create a sale of 20 birds at 2500 FCFA
+        sale_date = timezone.localdate().isoformat()
+        resp_create = self.client.post("/ventes/nouvelle/", {
+            "batch": self.batch.pk,
+            "date": sale_date,
+            "quantity_sold": 20,
+            "total_weight_kg": "42.50",
+            "unit_price": "2500.00",
+            "customer_name": "Client Initial",
+            "payment_status": Sale.PaymentStatus.CREDIT,
+            "notes": "Avance reçue",
+        })
+        self.assertEqual(resp_create.status_code, 302)
+        sale = Sale.objects.get(batch=self.batch, customer_name="Client Initial")
+        self.assertEqual(sale.quantity_sold, 20)
+        self.assertEqual(sale.total_amount, Decimal("50000.00"))
+        self.batch.refresh_from_db()
+        self.assertEqual(self.batch.current_stock, 480)
+
+        # 2. Verify edit and delete links on sales list
+        resp_list = self.client.get("/ventes/")
+        self.assertEqual(resp_list.status_code, 200)
+        self.assertContains(resp_list, f"/ventes/{sale.pk}/modifier/")
+        self.assertContains(resp_list, f"/ventes/{sale.pk}/supprimer/")
+
+        # 3. Edit the sale (increase quantity to 30, change price to 2600, mark as paid)
+        # Note: passing old total_amount to ensure it recalculates when qty/price changes
+        resp_edit_get = self.client.get(f"/ventes/{sale.pk}/modifier/")
+        self.assertEqual(resp_edit_get.status_code, 200)
+        self.assertContains(resp_edit_get, "Modifier la vente")
+
+        resp_edit_post = self.client.post(f"/ventes/{sale.pk}/modifier/", {
+            "batch": self.batch.pk,
+            "date": sale_date,
+            "quantity_sold": 30,
+            "total_weight_kg": "65.00",
+            "unit_price": "2600.00",
+            "total_amount": "50000.00",
+            "customer_name": "Client Modifié",
+            "payment_status": Sale.PaymentStatus.PAID,
+            "notes": "Soldé intégralement",
+        })
+        self.assertEqual(resp_edit_post.status_code, 302)
+        sale.refresh_from_db()
+        self.assertEqual(sale.quantity_sold, 30)
+        self.assertEqual(sale.unit_price, Decimal("2600.00"))
+        self.assertEqual(sale.total_amount, Decimal("78000.00"))
+        self.assertEqual(sale.customer_name, "Client Modifié")
+        self.assertEqual(sale.payment_status, Sale.PaymentStatus.PAID)
+        self.batch.refresh_from_db()
+        self.assertEqual(self.batch.current_stock, 470)
+
+        # 4. Delete the sale
+        resp_del = self.client.post(f"/ventes/{sale.pk}/supprimer/")
+        self.assertEqual(resp_del.status_code, 302)
+        self.assertFalse(Sale.objects.filter(pk=sale.pk).exists())
+        self.batch.refresh_from_db()
+        self.assertEqual(self.batch.current_stock, 500)
+
+
 
 
 

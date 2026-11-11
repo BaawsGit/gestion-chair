@@ -950,7 +950,48 @@ def sale_create(request):
         form.save()
         messages.success(request, "Vente enregistrée.")
         return redirect("sale-list")
-    return render(request, "poulailler_core/form_page.html", {"form": form, "title": "Nouvelle vente", "submit_label": "Enregistrer la vente"})
+    return render(request, "poulailler_core/form_page.html", {
+        "form": form,
+        "title": "Nouvelle vente",
+        "submit_label": "Enregistrer la vente",
+        "cancel_url": "/ventes/",
+    })
+
+
+@login_required
+@admin_required
+def sale_edit(request, pk):
+    sale = get_object_or_404(Sale, pk=pk)
+    form = SaleForm(request.POST or None, instance=sale)
+    if request.method == "POST" and form.is_valid():
+        sale = form.save()
+        messages.success(
+            request,
+            f"Vente du {sale.date.strftime('%d/%m/%Y')} ({sale.quantity_sold} sujet(s)) modifiée avec succès.",
+        )
+        return redirect("sale-list")
+    return render(request, "poulailler_core/form_page.html", {
+        "form": form,
+        "sale": sale,
+        "title": f"Modifier la vente · {sale.date.strftime('%d/%m/%Y')} ({sale.customer_name or 'Vente comptoir'})",
+        "submit_label": "Mettre à jour la vente",
+        "cancel_url": "/ventes/",
+    })
+
+
+@login_required
+@admin_required
+def sale_delete(request, pk):
+    sale = get_object_or_404(Sale, pk=pk)
+    if request.method == "POST":
+        sale.delete()
+        messages.success(request, "Vente supprimée et effectif du lot réajusté.")
+        return redirect("sale-list")
+    return render(request, "poulailler_core/confirm_delete.html", {
+        "title": "Supprimer la vente",
+        "object_name": f"Vente du {sale.date.strftime('%d/%m/%Y')} - {sale.quantity_sold} sujet(s) ({sale.total_amount:,.0f} FCFA) - {sale.customer_name or 'Vente comptoir'}",
+        "cancel_url": "/ventes/",
+    })
 
 
 @login_required

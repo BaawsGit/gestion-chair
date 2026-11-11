@@ -318,19 +318,42 @@ class SaleForm(StyledModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        if not self.instance.pk and "date" in self.fields and not self.initial.get("date"):
-            self.fields["date"].initial = timezone.localdate()
+        if not self.instance.pk:
+            if "date" in self.fields and not self.initial.get("date"):
+                self.fields["date"].initial = timezone.localdate()
+            if "batch" in self.fields and "initial" not in kwargs:
+                active_batch = Batch.objects.filter(status=Batch.Status.ACTIVE).first()
+                if active_batch:
+                    self.fields["batch"].initial = active_batch
 
     def clean_quantity_sold(self):
         quantity = self.cleaned_data["quantity_sold"]
         batch = self.cleaned_data.get("batch")
         if batch:
             available = batch.current_stock
-            if self.instance.pk:
+            if self.instance.pk and self.instance.batch_id == batch.pk:
                 available += self.instance.quantity_sold
             if quantity > available:
                 raise ValidationError(f"La quantité dépasse l'effectif disponible ({available}).")
         return quantity
+
+    def clean(self):
+        cleaned_data = super().clean()
+        quantity = cleaned_data.get("quantity_sold")
+        unit_price = cleaned_data.get("unit_price")
+        total_amount = cleaned_data.get("total_amount")
+
+        if quantity and unit_price:
+            calculated_total = (unit_price * Decimal(quantity)).quantize(Decimal("0.01"))
+            if not total_amount:
+                cleaned_data["total_amount"] = calculated_total
+            elif self.instance.pk:
+                qty_changed = quantity != self.instance.quantity_sold
+                price_changed = unit_price != self.instance.unit_price
+                total_unchanged = total_amount == self.instance.total_amount
+                if (qty_changed or price_changed) and total_unchanged:
+                    cleaned_data["total_amount"] = calculated_total
+        return cleaned_data
 
 
 class DailyEventForm(forms.Form):

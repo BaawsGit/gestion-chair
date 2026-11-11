@@ -11,9 +11,9 @@
     <p class="page-subtitle">Renseignez les informations requises ci-dessous.</p>
   </div>
   <div class="page-header-actions">
-    <a class="btn-app-secondary" href="{% url 'dashboard' %}">
+    <a class="btn-app-secondary" href="{% if cancel_url %}{{ cancel_url }}{% else %}{% url 'dashboard' %}{% endif %}">
       <i class="bi bi-arrow-left"></i>
-      <span>Retour au tableau de bord</span>
+      <span>{% if cancel_url %}Retour{% else %}Retour au tableau de bord{% endif %}</span>
     </a>
   </div>
 </div>
@@ -51,9 +51,31 @@
       <i class="bi bi-check-lg"></i>
       <span>{{ submit_label|default:'Enregistrer' }}</span>
     </button>
-    <a class="btn-app-secondary" href="{% url 'dashboard' %}">
+    <a class="btn-app-secondary" href="{% if cancel_url %}{{ cancel_url }}{% else %}{% url 'dashboard' %}{% endif %}">
       <span>Annuler</span>
     </a>
   </div>
 </form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  const qtyInput = document.getElementById('id_quantity_sold');
+  const priceInput = document.getElementById('id_unit_price');
+  const totalInput = document.getElementById('id_total_amount');
+
+  if (qtyInput && priceInput && totalInput) {
+    const updateTotal = () => {
+      const qty = parseFloat(qtyInput.value);
+      const price = parseFloat(priceInput.value);
+      if (!isNaN(qty) && qty > 0 && !isNaN(price) && price > 0) {
+        totalInput.value = (qty * price).toFixed(2);
+      }
+    };
+    qtyInput.addEventListener('input', updateTotal);
+    priceInput.addEventListener('input', updateTotal);
+  }
+});
+</script>
 {% endblock %}

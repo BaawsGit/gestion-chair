@@ -78,7 +78,7 @@ class Batch(models.Model):
 
     @property
     def sold_count(self):
-        return self.sales.aggregate(total=Sum("quantity_sold"))["total"] or 0
+        return self.sales.filter(sale_type="chicken").aggregate(total=Sum("quantity_sold"))["total"] or 0
 
     @property
     def current_stock(self):
@@ -137,6 +137,80 @@ class Expense(models.Model):
 
     def __str__(self):
         return f"{self.designation} - {self.amount}"
+
+    @property
+    def funded_amount(self):
+        return sum((f.amount for f in self.fundings.all()), Decimal("0.00"))
+
+    @property
+    def untagged_amount(self):
+        return max(self.amount - self.funded_amount, Decimal("0.00"))
+
+
+class ExpenseFunding(models.Model):
+    class SourceType(models.TextChoices):
+        CASH = "cash", "Pris dans la caisse (Trésorerie)"
+        LOAN = "loan", "En prêt / Avancé par un prêteur (À rembourser)"
+        REPAID = "repaid", "Prêt remboursé"
+
+    expense = models.ForeignKey(
+        Expense, verbose_name="dépense", related_name="fundings", on_delete=models.CASCADE
+    )
+    source_type = models.CharField(
+        "origine des fonds", max_length=12, choices=SourceType.choices, default=SourceType.CASH
+    )
+    lender_name = models.CharField(
+        "prêteur / financeur", max_length=120, blank=True,
+        help_text="Nom de la personne qui a prêté l'argent (ex: A, B, C...) ou qui a payé."
+    )
+    amount = models.DecimalField(
+        "montant financé (FCFA)", max_digits=14, decimal_places=2,
+        validators=[MinValueValidator(Decimal("0.01"))]
+    )
+    amount_repaid = models.DecimalField(
+        "montant remboursé (FCFA)", max_digits=14, decimal_places=2,
+        default=Decimal("0.00"), validators=[MinValueValidator(Decimal("0.00"))]
+    )
+    repaid_from_cash = models.BooleanField(
+        "remboursé depuis la caisse", default=False,
+        help_text="Si coché, ce remboursement est déduit du solde de la caisse."
+    )
+    repaid_date = models.DateField("date de remboursement", null=True, blank=True)
+    notes = models.CharField("notes", max_length=200, blank=True)
+    created_at = models.DateTimeField("créé le", auto_now_add=True)
+
+    class Meta:
+        ordering = ["pk"]
+        verbose_name = "financement de dépense"
+        verbose_name_plural = "financements de dépenses"
+
+    def __str__(self):
+        if self.source_type == self.SourceType.CASH:
+            label = f"Caisse ({self.lender_name})" if self.lender_name else "Pris dans la caisse"
+            return f"{label} : {self.amount} FCFA"
+        return f"Prêt {self.lender_name or 'Tiers'} : {self.amount} FCFA"
+
+    @property
+    def effective_repaid(self):
+        if self.source_type == self.SourceType.REPAID:
+            return self.amount
+        if self.source_type == self.SourceType.LOAN:
+            return min(self.amount_repaid, self.amount)
+        return Decimal("0.00")
+
+    @property
+    def remaining_to_repay(self):
+        if self.source_type in (self.SourceType.CASH, self.SourceType.REPAID):
+            return Decimal("0.00")
+        return max(self.amount - self.amount_repaid, Decimal("0.00"))
+
+    @property
+    def cash_outflow(self):
+        if self.source_type == self.SourceType.CASH:
+            return self.amount
+        if self.repaid_from_cash:
+            return self.effective_repaid
+        return Decimal("0.00")
 
 
 class Mortality(models.Model):
@@ -369,13 +443,24 @@ class TreatmentLog(models.Model):
 
 
 class Sale(models.Model):
+    class SaleType(models.TextChoices):
+        CHICKEN = "chicken", "Poulets (sujets)"
+        GIBLETS = "giblets", "Abats mélangés (gésiers, cœurs & foies)"
+        OTHER = "other", "Autre produit (fiente, divers...)"
+
     class PaymentStatus(models.TextChoices):
-        PAID = "paid", "Payé"
-        CREDIT = "credit", "Crédit / avance"
+        PAID = "paid", "Payé (100% réglé)"
+        PARTIAL = "partial", "Paiement partiel / Avance"
+        CREDIT = "credit", "Crédit (Non payé)"
 
     batch = models.ForeignKey(Batch, verbose_name="lot", related_name="sales", on_delete=models.PROTECT)
+    sale_type = models.CharField(
+        "type de vente", max_length=16, choices=SaleType.choices, default=SaleType.CHICKEN
+    )
     date = models.DateField("date")
-    quantity_sold = models.PositiveIntegerField("quantité vendue", validators=[MinValueValidator(1)])
+    quantity_sold = models.PositiveIntegerField(
+        "quantité vendue", default=1, validators=[MinValueValidator(1)]
+    )
     total_weight_kg = models.DecimalField(
         "poids total (kg)", max_digits=10, decimal_places=2, null=True, blank=True,
         validators=[MinValueValidator(Decimal("0.01"))]
@@ -390,7 +475,16 @@ class Sale(models.Model):
     )
     customer_name = models.CharField("client", max_length=160, blank=True)
     payment_status = models.CharField(
-        "paiement", max_length=8, choices=PaymentStatus.choices, default=PaymentStatus.PAID
+        "paiement", max_length=10, choices=PaymentStatus.choices, default=PaymentStatus.PAID
+    )
+    quantity_paid = models.PositiveIntegerField(
+        "quantité déjà payée (sujets)", null=True, blank=True,
+        help_text="Nombre de sujets déjà payés sur la commande (ex: 22 sur 40)."
+    )
+    amount_paid = models.DecimalField(
+        "montant déjà payé (FCFA)", max_digits=14, decimal_places=2, null=True, blank=True,
+        validators=[MinValueValidator(Decimal("0.00"))],
+        help_text="Montant réellement encaissé en caisse à ce jour."
     )
     notes = models.TextField("notes", blank=True)
 
@@ -405,13 +499,86 @@ class Sale(models.Model):
         verbose_name = "vente"
         verbose_name_plural = "ventes"
 
+    @property
+    def effective_amount_paid(self):
+        total = self.total_amount or Decimal("0.00")
+        if self.amount_paid is not None:
+            return min(max(self.amount_paid, Decimal("0.00")), total).quantize(Decimal("0.01"))
+        if self.payment_status == self.PaymentStatus.PAID:
+            return total.quantize(Decimal("0.01"))
+        return Decimal("0.00")
+
+    @property
+    def remaining_amount_due(self):
+        total = self.total_amount or Decimal("0.00")
+        return max(total - self.effective_amount_paid, Decimal("0.00")).quantize(Decimal("0.01"))
+
+    @property
+    def effective_quantity_paid(self):
+        if self.quantity_paid is not None:
+            return min(max(self.quantity_paid, 0), self.quantity_sold)
+        if self.payment_status == self.PaymentStatus.PAID:
+            return self.quantity_sold
+        return 0
+
+    @property
+    def quantity_unpaid(self):
+        return max(self.quantity_sold - self.effective_quantity_paid, 0)
+
     def save(self, *args, **kwargs):
         if self.total_amount is None:
             self.total_amount = (self.unit_price * self.quantity_sold).quantize(Decimal("0.01"))
+
+        if self.payment_status == self.PaymentStatus.PAID:
+            self.quantity_paid = self.quantity_sold
+            self.amount_paid = self.total_amount
+        elif self.payment_status == self.PaymentStatus.PARTIAL:
+            if self.quantity_paid is not None and self.amount_paid is None:
+                self.amount_paid = (self.unit_price * Decimal(self.quantity_paid)).quantize(Decimal("0.01"))
+            if self.amount_paid is None:
+                self.amount_paid = Decimal("0.00")
+            if self.quantity_paid is None:
+                if self.unit_price and self.unit_price > 0:
+                    self.quantity_paid = min(int(self.amount_paid // self.unit_price), self.quantity_sold)
+                else:
+                    self.quantity_paid = 0
+            if self.amount_paid >= self.total_amount:
+                self.amount_paid = self.total_amount
+                self.quantity_paid = self.quantity_sold
+                self.payment_status = self.PaymentStatus.PAID
+            elif self.amount_paid <= Decimal("0.00"):
+                self.amount_paid = Decimal("0.00")
+                self.quantity_paid = 0
+                self.payment_status = self.PaymentStatus.CREDIT
+        else:
+            # CREDIT status
+            if self.amount_paid is not None and self.amount_paid > Decimal("0.00"):
+                if self.amount_paid >= self.total_amount:
+                    self.amount_paid = self.total_amount
+                    self.quantity_paid = self.quantity_sold
+                    self.payment_status = self.PaymentStatus.PAID
+                else:
+                    self.payment_status = self.PaymentStatus.PARTIAL
+                    if self.quantity_paid is None and self.unit_price and self.unit_price > 0:
+                        self.quantity_paid = min(int(self.amount_paid // self.unit_price), self.quantity_sold)
+            elif self.quantity_paid is not None and self.quantity_paid > 0:
+                if self.quantity_paid >= self.quantity_sold:
+                    self.quantity_paid = self.quantity_sold
+                    self.amount_paid = self.total_amount
+                    self.payment_status = self.PaymentStatus.PAID
+                else:
+                    self.payment_status = self.PaymentStatus.PARTIAL
+                    self.amount_paid = (self.unit_price * Decimal(self.quantity_paid)).quantize(Decimal("0.01"))
+            else:
+                self.quantity_paid = 0
+                self.amount_paid = Decimal("0.00")
+
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"{self.batch} - {self.quantity_sold} poulet(s) - {self.total_amount}"
+        if self.sale_type == self.SaleType.CHICKEN:
+            return f"{self.batch} - {self.quantity_sold} poulet(s) - {self.total_amount}"
+        return f"{self.batch} - {self.get_sale_type_display()} ({self.quantity_sold}) - {self.total_amount}"
 
 
 class FeedFormula(models.Model):

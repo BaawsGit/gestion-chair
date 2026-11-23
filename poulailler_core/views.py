@@ -16,6 +16,7 @@ from .finance import (
     sync_all_feed_expenses,
     sync_batch_chick_expense,
     sync_feed_inventory_expense,
+    treasury_summary,
 )
 from .forms import (
     BatchForm,
@@ -33,6 +34,7 @@ from .models import (
     Batch,
     Expense,
     ExpenseCategory,
+    ExpenseFunding,
     FeedConsumption,
     FeedFormula,
     FeedFormulaItem,
@@ -761,6 +763,66 @@ def batch_history(request):
     return render(request, "poulailler_core/batches.html", {"batches": batches})
 
 
+def _get_existing_lenders():
+    names = (
+        ExpenseFunding.objects.exclude(lender_name="")
+        .values_list("lender_name", flat=True)
+        .distinct()
+    )
+    return sorted({n.strip() for n in names if n and n.strip()}, key=lambda s: s.lower())
+
+
+def _save_expense_fundings_from_post(expense, request):
+    if "funding_source[]" not in request.POST:
+        return
+    sources = request.POST.getlist("funding_source[]")
+    lenders = request.POST.getlist("funding_lender[]")
+    amounts = request.POST.getlist("funding_amount[]")
+    repaid_flags = request.POST.getlist("funding_repaid_cash[]")
+
+    valid_sources = dict(ExpenseFunding.SourceType.choices)
+    rows_to_create = []
+
+    for idx, src in enumerate(sources):
+        src_clean = (src or "").strip()
+        if not src_clean or src_clean not in valid_sources:
+            continue
+        lender = (lenders[idx] if idx < len(lenders) else "").strip()
+        amt_str = (amounts[idx] if idx < len(amounts) else "").strip().replace(",", ".")
+        repaid_cash = False
+        if idx < len(repaid_flags):
+            repaid_cash = repaid_flags[idx] in ("1", "true", "True", "on")
+
+        try:
+            amt = Decimal(amt_str) if amt_str else Decimal("0.00")
+        except Exception:
+            amt = Decimal("0.00")
+
+        # If there is only 1 funding line and amount wasn't typed, default to full expense amount
+        if len(sources) == 1 and amt <= 0 and (src_clean == ExpenseFunding.SourceType.CASH or lender):
+            amt = expense.amount
+
+        if amt <= 0:
+            continue
+
+        amount_repaid = amt if src_clean == ExpenseFunding.SourceType.REPAID else Decimal("0.00")
+        repaid_date = timezone.localdate() if src_clean == ExpenseFunding.SourceType.REPAID else None
+
+        rows_to_create.append({
+            "source_type": src_clean,
+            "lender_name": lender,
+            "amount": amt.quantize(Decimal("0.01")),
+            "amount_repaid": amount_repaid.quantize(Decimal("0.01")),
+            "repaid_from_cash": repaid_cash if src_clean == ExpenseFunding.SourceType.REPAID else False,
+            "repaid_date": repaid_date,
+        })
+
+    with transaction.atomic():
+        expense.fundings.all().delete()
+        for row in rows_to_create:
+            ExpenseFunding.objects.create(expense=expense, **row)
+
+
 @login_required
 def expense_list(request):
     batches = Batch.objects.order_by("-start_date", "-pk")
@@ -772,8 +834,9 @@ def expense_list(request):
     categories = ExpenseCategory.objects.all()
     batch_id = request.GET.get("batch")
     category_id = request.GET.get("category")
+    lender_filter = (request.GET.get("lender") or "").strip()
 
-    expenses = Expense.objects.select_related("batch", "category").order_by("-date", "-pk")
+    expenses = Expense.objects.select_related("batch", "category").prefetch_related("fundings").order_by("-date", "-pk")
     if batch_id:
         if batch_id == "general":
             expenses = expenses.filter(batch__isnull=True)
@@ -781,6 +844,8 @@ def expense_list(request):
             expenses = expenses.filter(batch_id=batch_id)
     if category_id:
         expenses = expenses.filter(category_id=category_id)
+    if lender_filter:
+        expenses = expenses.filter(fundings__lender_name__iexact=lender_filter).distinct()
 
     total_amount = expenses.aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
     return render(request, "poulailler_core/expenses.html", {
@@ -788,8 +853,10 @@ def expense_list(request):
         "total_amount": total_amount,
         "batches": batches,
         "categories": categories,
+        "existing_lenders": _get_existing_lenders(),
         "selected_batch": batch_id,
         "selected_category": category_id,
+        "selected_lender": lender_filter,
     })
 
 
@@ -799,6 +866,7 @@ def expense_create(request):
     form = ExpenseForm(request.POST or None, request.FILES or None)
     if request.method == "POST" and form.is_valid():
         expense = form.save()
+        _save_expense_fundings_from_post(expense, request)
         if hasattr(expense, "feed_inventory") and expense.feed_inventory:
             messages.success(request, f"Dépense enregistrée et stock d'aliment mis à jour ({expense.feed_inventory.get_feed_type_display()}).")
         else:
@@ -808,26 +876,44 @@ def expense_create(request):
         "form": form,
         "title": "Nouvelle dépense",
         "submit_label": "Enregistrer la dépense",
+        "existing_lenders": _get_existing_lenders(),
+        "existing_fundings_json": "null",
     })
 
 
 @login_required
 @admin_required
 def expense_edit(request, pk):
-    expense = get_object_or_404(Expense, pk=pk)
+    expense = get_object_or_404(Expense.objects.prefetch_related("fundings"), pk=pk)
     form = ExpenseForm(request.POST or None, request.FILES or None, instance=expense)
     if request.method == "POST" and form.is_valid():
         expense = form.save()
+        _save_expense_fundings_from_post(expense, request)
         if hasattr(expense, "feed_inventory") and expense.feed_inventory:
             messages.success(request, f"Dépense modifiée et stock d'aliment synchronisé ({expense.feed_inventory.get_feed_type_display()}).")
         else:
             messages.success(request, "Dépense modifiée.")
+        next_url = request.POST.get("next") or request.GET.get("next")
+        if next_url == "finances":
+            return redirect("finance-dashboard")
         return redirect("expense-list")
+
+    fundings_data = [
+        {
+            "source_type": f.source_type,
+            "lender_name": f.lender_name,
+            "amount": float(f.amount),
+            "repaid_from_cash": f.repaid_from_cash,
+        }
+        for f in expense.fundings.all()
+    ]
     return render(request, "poulailler_core/expense_form.html", {
         "form": form,
         "expense": expense,
         "title": "Modifier la dépense",
         "submit_label": "Mettre à jour",
+        "existing_lenders": _get_existing_lenders(),
+        "existing_fundings_json": json.dumps(fundings_data) if fundings_data else "null",
     })
 
 
@@ -923,21 +1009,79 @@ def feed_purchase_delete(request, pk):
 def sale_list(request):
     batches = Batch.objects.order_by("-start_date", "-pk")
     batch_id = request.GET.get("batch")
+    sale_type = request.GET.get("sale_type")
+    payment_status = request.GET.get("payment_status")
     sales = Sale.objects.select_related("batch").order_by("-date", "-pk")
     if batch_id:
         sales = sales.filter(batch_id=batch_id)
+    if sale_type:
+        sales = sales.filter(sale_type=sale_type)
+    if payment_status:
+        if payment_status == "unpaid":
+            sales = sales.filter(payment_status__in=[Sale.PaymentStatus.PARTIAL, Sale.PaymentStatus.CREDIT])
+        else:
+            sales = sales.filter(payment_status=payment_status)
 
     aggregates = sales.aggregate(
         total_revenue=Sum("total_amount"),
-        total_sold=Sum("quantity_sold"),
         total_weight=Sum("total_weight_kg"),
+    )
+
+    paid_revenue = Decimal("0.00")
+    pending_revenue = Decimal("0.00")
+    paid_count = 0
+    pending_count = 0
+    total_paid_birds = 0
+    total_unpaid_birds = 0
+
+    for s in sales:
+        s_paid = s.effective_amount_paid
+        s_rem = s.remaining_amount_due
+        paid_revenue += s_paid
+        pending_revenue += s_rem
+        if s_paid > Decimal("0.00"):
+            paid_count += 1
+        if s_rem > Decimal("0.00"):
+            pending_count += 1
+        if s.sale_type == Sale.SaleType.CHICKEN:
+            total_paid_birds += s.effective_quantity_paid
+            total_unpaid_birds += s.quantity_unpaid
+
+    chicken_agg = sales.filter(sale_type=Sale.SaleType.CHICKEN).aggregate(
+        revenue=Sum("total_amount"),
+        sold=Sum("quantity_sold"),
+    )
+    giblets_qs = sales.filter(sale_type=Sale.SaleType.GIBLETS)
+    giblets_agg = giblets_qs.aggregate(
+        revenue=Sum("total_amount"),
+        qty=Sum("quantity_sold"),
+        weight=Sum("total_weight_kg"),
+    )
+    other_agg = sales.filter(sale_type=Sale.SaleType.OTHER).aggregate(
+        revenue=Sum("total_amount"),
     )
     return render(request, "poulailler_core/sales.html", {
         "sales": sales,
         "batches": batches,
+        "sale_types": Sale.SaleType.choices,
+        "payment_statuses": Sale.PaymentStatus.choices,
         "selected_batch": batch_id,
+        "selected_sale_type": sale_type,
+        "selected_payment_status": payment_status,
         "total_revenue": aggregates["total_revenue"] or Decimal("0.00"),
-        "total_sold": aggregates["total_sold"] or 0,
+        "paid_revenue": paid_revenue.quantize(Decimal("0.01")),
+        "paid_count": paid_count,
+        "pending_revenue": pending_revenue.quantize(Decimal("0.01")),
+        "pending_count": pending_count,
+        "chicken_revenue": chicken_agg["revenue"] or Decimal("0.00"),
+        "giblets_revenue": giblets_agg["revenue"] or Decimal("0.00"),
+        "giblets_count": giblets_qs.count(),
+        "giblets_qty": giblets_agg["qty"] or 0,
+        "giblets_weight": giblets_agg["weight"] or Decimal("0.00"),
+        "other_revenue": other_agg["revenue"] or Decimal("0.00"),
+        "total_sold": chicken_agg["sold"] or 0,
+        "total_paid_birds": total_paid_birds,
+        "total_unpaid_birds": total_unpaid_birds,
         "total_weight": aggregates["total_weight"] or Decimal("0.00"),
     })
 
@@ -945,14 +1089,33 @@ def sale_list(request):
 @login_required
 @admin_required
 def sale_create(request):
-    form = SaleForm(request.POST or None)
+    initial = {}
+    preset_type = request.GET.get("type")
+    if preset_type in dict(Sale.SaleType.choices):
+        initial["sale_type"] = preset_type
+    active_batch = Batch.objects.filter(status=Batch.Status.ACTIVE).first()
+    if active_batch:
+        initial["batch"] = active_batch
+
+    form = SaleForm(request.POST or None, initial=initial)
     if request.method == "POST" and form.is_valid():
-        form.save()
-        messages.success(request, "Vente enregistrée.")
+        sale = form.save()
+        if sale.sale_type == Sale.SaleType.GIBLETS:
+            messages.success(
+                request,
+                f"Vente d'abats (gésiers, cœurs & foies) enregistrée ({sale.total_amount:,.0f} FCFA).",
+            )
+        elif sale.sale_type == Sale.SaleType.OTHER:
+            messages.success(
+                request,
+                f"Vente ({sale.get_sale_type_display()}) enregistrée ({sale.total_amount:,.0f} FCFA).",
+            )
+        else:
+            messages.success(request, "Vente enregistrée.")
         return redirect("sale-list")
     return render(request, "poulailler_core/form_page.html", {
         "form": form,
-        "title": "Nouvelle vente",
+        "title": "Nouvelle vente (Poulets, Abats ou Autres)",
         "submit_label": "Enregistrer la vente",
         "cancel_url": "/ventes/",
     })
@@ -967,13 +1130,13 @@ def sale_edit(request, pk):
         sale = form.save()
         messages.success(
             request,
-            f"Vente du {sale.date.strftime('%d/%m/%Y')} ({sale.quantity_sold} sujet(s)) modifiée avec succès.",
+            f"Vente du {sale.date.strftime('%d/%m/%Y')} ({sale.get_sale_type_display()}) modifiée avec succès.",
         )
         return redirect("sale-list")
     return render(request, "poulailler_core/form_page.html", {
         "form": form,
         "sale": sale,
-        "title": f"Modifier la vente · {sale.date.strftime('%d/%m/%Y')} ({sale.customer_name or 'Vente comptoir'})",
+        "title": f"Modifier la vente · {sale.date.strftime('%d/%m/%Y')} ({sale.get_sale_type_display()} - {sale.customer_name or 'Vente comptoir'})",
         "submit_label": "Mettre à jour la vente",
         "cancel_url": "/ventes/",
     })
@@ -985,13 +1148,33 @@ def sale_delete(request, pk):
     sale = get_object_or_404(Sale, pk=pk)
     if request.method == "POST":
         sale.delete()
-        messages.success(request, "Vente supprimée et effectif du lot réajusté.")
+        messages.success(request, "Vente supprimée et données du lot mises à jour.")
         return redirect("sale-list")
     return render(request, "poulailler_core/confirm_delete.html", {
         "title": "Supprimer la vente",
-        "object_name": f"Vente du {sale.date.strftime('%d/%m/%Y')} - {sale.quantity_sold} sujet(s) ({sale.total_amount:,.0f} FCFA) - {sale.customer_name or 'Vente comptoir'}",
+        "object_name": f"Vente du {sale.date.strftime('%d/%m/%Y')} - {sale.get_sale_type_display()} ({sale.total_amount:,.0f} FCFA) - {sale.customer_name or 'Vente comptoir'}",
         "cancel_url": "/ventes/",
     })
+
+
+@login_required
+@admin_required
+def sale_settle(request, pk):
+    """Solder en 1 clic le reste à payer d'une vente partielle ou à crédit."""
+    if request.method != "POST":
+        return redirect("sale-list")
+    sale = get_object_or_404(Sale, pk=pk)
+    remaining_before = sale.remaining_amount_due
+    unpaid_birds_before = sale.quantity_unpaid
+    sale.payment_status = Sale.PaymentStatus.PAID
+    sale.quantity_paid = sale.quantity_sold
+    sale.amount_paid = sale.total_amount
+    sale.save()
+    messages.success(
+        request,
+        f"Solde réglé pour {sale.customer_name or 'Vente comptoir'} : +{remaining_before:,.0f} FCFA ({unpaid_birds_before} sujet(s) restants) ajoutés aux encaissements et à la trésorerie.",
+    )
+    return redirect("sale-list")
 
 
 @login_required
@@ -1462,4 +1645,183 @@ def feed_preparation_delete(request, pk):
         "object_name": f"Fabrication provende {prep.get_feed_type_display()} · {prep.total_produced_kg:,.0f} kg ({prep.total_cost:,.0f} FCFA)",
         "cancel_url": f"/provende/preparations/{prep.pk}/",
     })
+
+
+# ==============================================================================
+# FINANCES, TRÉSORERIE (CAISSE) & SUIVI DES PRÊTEURS / REMBOURSEMENTS
+# ==============================================================================
+
+@login_required
+def finance_dashboard(request):
+    """
+    Tableau de bord de la Trésorerie (Caisse) et des Prêteurs :
+    - Calcul du solde réel en caisse = Ventes encaissées (Payées) - Dépenses prises en caisse - Remboursements pris en caisse
+    - Suivi détaillé par prêteur (combien emprunté, combien remboursé, combien on doit encore à qui)
+    - Filtrage par lot, par prêteur et par origine des fonds (Caisse, En prêt, Remboursé, Non étiqueté)
+    - Étiquetage multi-prêteurs sur chaque dépense (ex: 500 000 F = 100 000 A + 200 000 B + 200 000 C)
+    """
+    batches = Batch.objects.order_by("-start_date", "-pk")
+    for b in batches:
+        if b.chick_cost > 0 and not Expense.objects.filter(batch=b, category__name__iexact="Poussins").exists():
+            sync_batch_chick_expense(b)
+    sync_all_feed_expenses()
+
+    batch_id = request.GET.get("batch")
+    lender_filter = (request.GET.get("lender") or "").strip()
+    source_filter = (request.GET.get("source") or "").strip()
+
+    summary = treasury_summary(batch_id=batch_id)
+
+    expenses_qs = Expense.objects.select_related("batch", "category").prefetch_related("fundings").order_by("-date", "-pk")
+    if batch_id:
+        if batch_id == "general":
+            expenses_qs = expenses_qs.filter(batch__isnull=True)
+        else:
+            expenses_qs = expenses_qs.filter(batch_id=batch_id)
+
+    if lender_filter:
+        expenses_qs = expenses_qs.filter(fundings__lender_name__iexact=lender_filter).distinct()
+
+    if source_filter == "cash":
+        expenses_qs = expenses_qs.filter(fundings__source_type=ExpenseFunding.SourceType.CASH).distinct()
+    elif source_filter == "loan":
+        expenses_qs = expenses_qs.filter(fundings__source_type=ExpenseFunding.SourceType.LOAN).distinct()
+    elif source_filter == "repaid":
+        expenses_qs = expenses_qs.filter(fundings__source_type=ExpenseFunding.SourceType.REPAID).distinct()
+    elif source_filter == "untagged":
+        expenses_qs = [e for e in expenses_qs if e.untagged_amount > 0]
+
+    selected_lender_summary = None
+    if lender_filter:
+        for l_item in summary["lenders_breakdown"]:
+            if l_item["name"].lower() == lender_filter.lower():
+                selected_lender_summary = l_item
+                break
+
+    return render(request, "poulailler_core/finances.html", {
+        "summary": summary,
+        "expenses": expenses_qs,
+        "batches": batches,
+        "existing_lenders": _get_existing_lenders(),
+        "selected_batch": batch_id,
+        "selected_lender": lender_filter,
+        "selected_source": source_filter,
+        "selected_lender_summary": selected_lender_summary,
+    })
+
+
+@login_required
+@admin_required
+def expense_funding_update(request, pk):
+    """Étiqueter ou ventiler le financement d'une dépense (Caisse et/ou 1 à N prêteurs)."""
+    expense = get_object_or_404(Expense.objects.prefetch_related("fundings"), pk=pk)
+    if request.method == "POST":
+        _save_expense_fundings_from_post(expense, request)
+        messages.success(
+            request,
+            f"Financement de la dépense « {expense.designation} » ({expense.amount:,.0f} FCFA) mis à jour.",
+        )
+    redirect_to = request.POST.get("next") or "/finances/"
+    return redirect(redirect_to)
+
+
+@login_required
+@admin_required
+def funding_repay(request, pk):
+    """Marquer un prêt (ExpenseFunding) comme remboursé (totalement ou partiellement, depuis la caisse ou hors caisse)."""
+    if request.method != "POST":
+        return redirect("finance-dashboard")
+
+    funding = get_object_or_404(ExpenseFunding.objects.select_related("expense"), pk=pk)
+    action = request.POST.get("action", "repay")
+    from_cash = request.POST.get("from_cash") in ("1", "true", "True", "on")
+
+    if action == "unrepay":
+        funding.source_type = ExpenseFunding.SourceType.LOAN
+        funding.amount_repaid = Decimal("0.00")
+        funding.repaid_from_cash = False
+        funding.repaid_date = None
+        funding.save()
+        messages.info(
+            request,
+            f"Le prêt de {funding.lender_name or 'Tiers'} ({funding.amount:,.0f} FCFA) a été remis en statut « À rembourser ».",
+        )
+    else:
+        custom_amount_str = (request.POST.get("amount_to_repay") or "").strip().replace(",", ".")
+        if custom_amount_str:
+            try:
+                add_repaid = Decimal(custom_amount_str)
+            except Exception:
+                add_repaid = funding.remaining_to_repay
+        else:
+            add_repaid = funding.remaining_to_repay
+
+        new_repaid = min(funding.amount_repaid + max(add_repaid, Decimal("0.00")), funding.amount)
+        funding.amount_repaid = new_repaid.quantize(Decimal("0.01"))
+        funding.repaid_from_cash = from_cash
+        funding.repaid_date = timezone.localdate()
+        if funding.amount_repaid >= funding.amount:
+            funding.source_type = ExpenseFunding.SourceType.REPAID
+        else:
+            funding.source_type = ExpenseFunding.SourceType.LOAN
+        funding.save()
+
+        caisse_note = " (déduit de la caisse)" if from_cash else " (hors caisse)"
+        messages.success(
+            request,
+            f"Remboursement enregistré pour {funding.lender_name or 'ce prêteur'} : {funding.amount_repaid:,.0f} / {funding.amount:,.0f} FCFA{caisse_note}.",
+        )
+
+    redirect_to = request.POST.get("next") or "/finances/"
+    return redirect(redirect_to)
+
+
+@login_required
+@admin_required
+def lender_repay_all(request):
+    """Solder tous les prêts restants d'un prêteur en un clic."""
+    if request.method != "POST":
+        return redirect("finance-dashboard")
+
+    lender_name = (request.POST.get("lender_name") or "").strip()
+    from_cash = request.POST.get("from_cash") in ("1", "true", "True", "on")
+    batch_id = (request.POST.get("batch") or "").strip()
+
+    if not lender_name:
+        return redirect("finance-dashboard")
+
+    qs = ExpenseFunding.objects.filter(source_type=ExpenseFunding.SourceType.LOAN)
+    if lender_name == "Prêteur non spécifié":
+        qs = qs.filter(lender_name="")
+    else:
+        qs = qs.filter(lender_name__iexact=lender_name)
+
+    if batch_id:
+        if batch_id == "general":
+            qs = qs.filter(expense__batch__isnull=True)
+        else:
+            qs = qs.filter(expense__batch_id=batch_id)
+
+    total_settled = Decimal("0.00")
+    count = 0
+    with transaction.atomic():
+        for f in qs:
+            rem = f.remaining_to_repay
+            if rem > 0:
+                total_settled += rem
+                count += 1
+            f.amount_repaid = f.amount
+            f.source_type = ExpenseFunding.SourceType.REPAID
+            f.repaid_from_cash = from_cash
+            f.repaid_date = timezone.localdate()
+            f.save()
+
+    caisse_note = " (prélevé sur la caisse)" if from_cash else " (hors caisse)"
+    messages.success(
+        request,
+        f"Tous les prêts de « {lender_name} » ont été soldés ({count} ligne(s) pour un total de {total_settled:,.0f} FCFA{caisse_note}).",
+    )
+    redirect_to = request.POST.get("next") or "/finances/"
+    return redirect(redirect_to)
+
 

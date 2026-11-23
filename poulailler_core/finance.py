@@ -34,12 +34,18 @@ def batch_financials(batch):
         amortization += expense.amount * Decimal(amortized_days) / life_days
 
     revenue = batch.sales.aggregate(total=Sum("total_amount"))["total"] or Decimal("0.00")
+    chicken_revenue = batch.sales.filter(sale_type="chicken").aggregate(total=Sum("total_amount"))["total"] or Decimal("0.00")
+    giblets_revenue = batch.sales.filter(sale_type="giblets").aggregate(total=Sum("total_amount"))["total"] or Decimal("0.00")
+    byproduct_revenue = (revenue - chicken_revenue).quantize(CENT)
     total_costs = direct_costs + amortization
     net = revenue - total_costs
     age = max(batch.current_age_days, 1)
     projected = (net * Decimal(batch.target_duration_days) / Decimal(age)).quantize(CENT)
     return {
         "revenue": revenue,
+        "chicken_revenue": chicken_revenue.quantize(CENT),
+        "giblets_revenue": giblets_revenue.quantize(CENT),
+        "byproduct_revenue": byproduct_revenue,
         "direct_costs": direct_costs.quantize(CENT),
         "amortization": amortization.quantize(CENT),
         "total_costs": total_costs.quantize(CENT),
@@ -173,4 +179,116 @@ def sync_all_feed_expenses():
                 inv.batch = active_batch
                 FeedInventory.objects.filter(pk=inv.pk).update(batch=active_batch)
             sync_feed_inventory_expense(inv)
+
+
+def treasury_summary(batch_id=None):
+    """
+    Compute complete treasury (Caisse) and loans/lenders summary:
+    - paid_sales_total: total cash collected from PAID sales
+    - pending_sales_total: total sales waiting for payment (CREDIT)
+    - cash_expenses_total: expenses (or parts of expenses) taken directly from the cash box
+    - cash_repayments_total: loan repayments taken from the cash box
+    - total_cash_outflow: cash_expenses_total + cash_repayments_total
+    - cash_balance: paid_sales_total - total_cash_outflow (what truly remains in the cash box!)
+    - total_borrowed: total amount financed via loans by lenders
+    - total_repaid: total amount of loans already repaid
+    - total_remaining_debt: how much we still owe to all lenders combined
+    - lenders_breakdown: list of dicts per lender (borrowed, repaid, remaining, count)
+    """
+    from .models import Expense, ExpenseFunding, Sale
+
+    sales_qs = Sale.objects.all()
+    expenses_qs = Expense.objects.prefetch_related("fundings").all()
+    fundings_qs = ExpenseFunding.objects.select_related("expense").all()
+
+    if batch_id:
+        if batch_id == "general":
+            expenses_qs = expenses_qs.filter(batch__isnull=True)
+            fundings_qs = fundings_qs.filter(expense__batch__isnull=True)
+            sales_qs = sales_qs.none()
+        else:
+            sales_qs = sales_qs.filter(batch_id=batch_id)
+            expenses_qs = expenses_qs.filter(batch_id=batch_id)
+            fundings_qs = fundings_qs.filter(expense__batch_id=batch_id)
+
+    paid_sales_total = Decimal("0.00")
+    pending_sales_total = Decimal("0.00")
+    for s in sales_qs:
+        paid_sales_total += s.effective_amount_paid
+        pending_sales_total += s.remaining_amount_due
+
+    cash_expenses_total = Decimal("0.00")
+    cash_repayments_total = Decimal("0.00")
+    total_borrowed = Decimal("0.00")
+    total_repaid = Decimal("0.00")
+    total_remaining_debt = Decimal("0.00")
+
+    lenders_map = {}
+
+    for f in fundings_qs:
+        if f.source_type == ExpenseFunding.SourceType.CASH:
+            cash_expenses_total += f.amount
+        else:
+            # Loan or Repaid loan
+            borrowed = f.amount
+            repaid = f.effective_repaid
+            remaining = f.remaining_to_repay
+
+            total_borrowed += borrowed
+            total_repaid += repaid
+            total_remaining_debt += remaining
+
+            if f.repaid_from_cash:
+                cash_repayments_total += repaid
+
+            lender_key = (f.lender_name or "Prêteur non spécifié").strip()
+            entry = lenders_map.setdefault(lender_key, {
+                "name": lender_key,
+                "borrowed": Decimal("0.00"),
+                "repaid": Decimal("0.00"),
+                "remaining": Decimal("0.00"),
+                "count": 0,
+                "funding_ids": [],
+            })
+            entry["borrowed"] += borrowed
+            entry["repaid"] += repaid
+            entry["remaining"] += remaining
+            entry["count"] += 1
+            entry["funding_ids"].append(f.pk)
+
+    total_expenses_amount = Decimal("0.00")
+    tagged_expenses_amount = Decimal("0.00")
+    untagged_expenses_count = 0
+    for exp in expenses_qs:
+        total_expenses_amount += exp.amount
+        funded = sum((f.amount for f in exp.fundings.all()), Decimal("0.00"))
+        tagged_expenses_amount += min(funded, exp.amount)
+        if funded < exp.amount:
+            untagged_expenses_count += 1
+
+    untagged_expenses_amount = max(total_expenses_amount - tagged_expenses_amount, Decimal("0.00"))
+
+    total_cash_outflow = cash_expenses_total + cash_repayments_total
+    cash_balance = paid_sales_total - total_cash_outflow
+
+    lenders_breakdown = sorted(
+        lenders_map.values(),
+        key=lambda x: (-x["remaining"], -x["borrowed"], x["name"].lower()),
+    )
+
+    return {
+        "paid_sales_total": paid_sales_total.quantize(CENT),
+        "pending_sales_total": pending_sales_total.quantize(CENT),
+        "cash_expenses_total": cash_expenses_total.quantize(CENT),
+        "cash_repayments_total": cash_repayments_total.quantize(CENT),
+        "total_cash_outflow": total_cash_outflow.quantize(CENT),
+        "cash_balance": cash_balance.quantize(CENT),
+        "total_borrowed": total_borrowed.quantize(CENT),
+        "total_repaid": total_repaid.quantize(CENT),
+        "total_remaining_debt": total_remaining_debt.quantize(CENT),
+        "total_expenses_amount": total_expenses_amount.quantize(CENT),
+        "untagged_expenses_amount": untagged_expenses_amount.quantize(CENT),
+        "untagged_expenses_count": untagged_expenses_count,
+        "lenders_breakdown": lenders_breakdown,
+    }
 

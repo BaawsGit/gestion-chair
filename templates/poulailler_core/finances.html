@@ -1,0 +1,574 @@
+{% extends 'base.html' %}
+{% block title %}Finances & Trésorerie · Gestion Chair{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="page-header-info">
+    <div class="d-flex align-items-center gap-2">
+      <span class="page-tag"><i class="bi bi-safe2 text-success"></i> TRÉSORERIE & REMBOURSEMENTS</span>
+    </div>
+    <h1 class="page-title">Finances, Caisse & Suivi des Prêteurs</h1>
+    <p class="page-subtitle">
+      Suivez en temps réel l'argent disponible dans la caisse, étiquetez qui a financé chaque dépense (un ou plusieurs prêteurs) et visualisez combien vous devez à chacun.
+    </p>
+  </div>
+  <div class="page-header-actions">
+    {% if user.is_staff %}
+    <a class="btn-app-secondary" href="{% url 'sale-list' %}">
+      <i class="bi bi-cart-check"></i>
+      <span>Voir les ventes</span>
+    </a>
+    <a class="btn-app-primary" href="{% url 'expense-create' %}">
+      <i class="bi bi-plus-circle-fill"></i>
+      <span>Nouvelle dépense financée</span>
+    </a>
+    {% endif %}
+  </div>
+</div>
+
+<!-- 1. KPI Cards: Caisse & Dettes -->
+<section class="metrics-row" aria-label="Indicateurs de trésorerie" style="grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));">
+  <!-- Solde en Caisse -->
+  <article class="kpi-card kpi-card-emerald" style="border: 2px solid #10b981;">
+    <div class="kpi-top">
+      <span class="kpi-label">Reste Disponible en Caisse</span>
+      <div class="kpi-icon">
+        <i class="bi bi-safe2-fill"></i>
+      </div>
+    </div>
+    <div class="kpi-value {% if summary.cash_balance >= 0 %}text-success{% else %}text-danger{% endif %}">
+      {{ summary.cash_balance|floatformat:0 }} <small class="fs-6 text-muted">FCFA</small>
+    </div>
+    <div class="kpi-footer flex-wrap gap-1">
+      <span class="app-badge badge-success-soft">
+        <i class="bi bi-calculator"></i>
+        Encaissé ({{ summary.paid_sales_total|floatformat:0 }}) − Pris en caisse ({{ summary.total_cash_outflow|floatformat:0 }})
+      </span>
+    </div>
+  </article>
+
+  <!-- Total Ventes Encaissées -->
+  <article class="kpi-card kpi-card-amber">
+    <div class="kpi-top">
+      <span class="kpi-label">Entrées Caisse (Ventes Payées)</span>
+      <div class="kpi-icon">
+        <i class="bi bi-cash-coin"></i>
+      </div>
+    </div>
+    <div class="kpi-value text-warning-emphasis">{{ summary.paid_sales_total|floatformat:0 }} <small class="fs-6 text-muted">FCFA</small></div>
+    <div class="kpi-footer flex-wrap gap-1">
+      <span class="app-badge badge-warning-soft">
+        <i class="bi bi-hourglass-split"></i>
+        En attente clients : {{ summary.pending_sales_total|floatformat:0 }} FCFA
+      </span>
+    </div>
+  </article>
+
+  <!-- Sorties de Caisse -->
+  <article class="kpi-card kpi-card-indigo">
+    <div class="kpi-top">
+      <span class="kpi-label">Sorties Prises dans la Caisse</span>
+      <div class="kpi-icon">
+        <i class="bi bi-box-arrow-up-right"></i>
+      </div>
+    </div>
+    <div class="kpi-value text-dark">{{ summary.total_cash_outflow|floatformat:0 }} <small class="fs-6 text-muted">FCFA</small></div>
+    <div class="kpi-footer flex-wrap gap-1">
+      <span class="text-muted small">
+        Dépenses caisse : <strong>{{ summary.cash_expenses_total|floatformat:0 }} F</strong>
+        {% if summary.cash_repayments_total > 0 %}
+          · Remb. prêts : <strong>{{ summary.cash_repayments_total|floatformat:0 }} F</strong>
+        {% endif %}
+      </span>
+    </div>
+  </article>
+
+  <!-- Dettes / Prêts à Rembourser -->
+  <article class="kpi-card kpi-card-rose">
+    <div class="kpi-top">
+      <span class="kpi-label">Dettes Prêteurs (À Rembourser)</span>
+      <div class="kpi-icon">
+        <i class="bi bi-people-fill"></i>
+      </div>
+    </div>
+    <div class="kpi-value {% if summary.total_remaining_debt > 0 %}text-danger{% else %}text-success{% endif %}">
+      {{ summary.total_remaining_debt|floatformat:0 }} <small class="fs-6 text-muted">FCFA</small>
+    </div>
+    <div class="kpi-footer flex-wrap gap-1">
+      <span class="app-badge {% if summary.total_remaining_debt > 0 %}badge-danger-soft{% else %}badge-success-soft{% endif %}">
+        <i class="bi bi-arrow-repeat"></i>
+        Sur {{ summary.total_borrowed|floatformat:0 }} F empruntés ({{ summary.total_repaid|floatformat:0 }} F remboursés)
+      </span>
+    </div>
+  </article>
+</section>
+
+<!-- 2. Récapitulatif par Prêteur ("Combien je dois à qui") -->
+<div class="app-card mb-4">
+  <div class="card-header-clean flex-wrap">
+    <div>
+      <h2 class="card-title-clean">
+        <i class="bi bi-person-lines-fill"></i>
+        <span>Situation des Prêteurs (Combien on doit à qui)</span>
+      </h2>
+      <div class="small text-muted mt-1">
+        Cliquez sur un prêteur pour filtrer toutes les dépenses qu'il a financées, ou enregistrez un remboursement.
+      </div>
+    </div>
+    {% if selected_lender %}
+      <a href="{% url 'finance-dashboard' %}{% if selected_batch %}?batch={{ selected_batch }}{% endif %}" class="btn-app-secondary btn-sm">
+        <i class="bi bi-x-circle"></i> Afficher tous les prêteurs
+      </a>
+    {% endif %}
+  </div>
+
+  {% if summary.lenders_breakdown %}
+  <div class="app-table-wrapper">
+    <table class="app-table">
+      <thead>
+        <tr>
+          <th>Prêteur / Financeur</th>
+          <th class="text-center">Contributions</th>
+          <th class="text-end">Total avancé / prêté</th>
+          <th class="text-end">Déjà remboursé</th>
+          <th class="text-end">Reste à lui rembourser</th>
+          <th class="text-center">Statut</th>
+          <th class="text-end">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for lender in summary.lenders_breakdown %}
+        <tr class="{% if selected_lender|lower == lender.name|lower %}table-active{% endif %}">
+          <td class="fw-bold text-dark">
+            <a href="?lender={{ lender.name|urlencode }}{% if selected_batch %}&batch={{ selected_batch }}{% endif %}" class="text-decoration-none text-dark d-inline-flex align-items-center gap-2">
+              <span class="user-avatar" style="width:28px;height:28px;font-size:0.75rem;">{{ lender.name|slice:":1"|upper }}</span>
+              <span>{{ lender.name }}</span>
+            </a>
+          </td>
+          <td class="text-center">
+            <span class="app-badge badge-neutral-soft">{{ lender.count }} dépense(s)</span>
+          </td>
+          <td class="text-end fw-semibold text-nowrap">{{ lender.borrowed|floatformat:0 }} FCFA</td>
+          <td class="text-end text-success fw-semibold text-nowrap">{{ lender.repaid|floatformat:0 }} FCFA</td>
+          <td class="text-end fw-bold fs-6 text-nowrap {% if lender.remaining > 0 %}text-danger{% else %}text-success{% endif %}">
+            {{ lender.remaining|floatformat:0 }} FCFA
+          </td>
+          <td class="text-center">
+            {% if lender.remaining == 0 %}
+              <span class="app-badge badge-success-soft">
+                <i class="bi bi-check-circle-fill"></i> Soldé
+              </span>
+            {% elif lender.repaid > 0 %}
+              <span class="app-badge badge-warning-soft">
+                <i class="bi bi-hourglass-split"></i> Partiel
+              </span>
+            {% else %}
+              <span class="app-badge badge-danger-soft">
+                <i class="bi bi-clock-history"></i> À rembourser
+              </span>
+            {% endif %}
+          </td>
+          <td class="text-end text-nowrap">
+            <a href="?lender={{ lender.name|urlencode }}{% if selected_batch %}&batch={{ selected_batch }}{% endif %}#expensesLedger"
+               class="btn btn-sm btn-outline-primary py-0 px-2 me-1" title="Voir toutes les dépenses financées par {{ lender.name }}">
+              <i class="bi bi-funnel"></i> Détails
+            </a>
+            {% if user.is_staff and lender.remaining > 0 %}
+            <form method="post" action="{% url 'lender-repay-all' %}" class="d-inline">
+              {% csrf_token %}
+              <input type="hidden" name="lender_name" value="{{ lender.name }}">
+              <input type="hidden" name="batch" value="{{ selected_batch|default:'' }}">
+              <input type="hidden" name="from_cash" value="1">
+              <input type="hidden" name="next" value="{{ request.get_full_path }}">
+              <button type="submit" class="btn btn-sm btn-success py-0 px-2"
+                      title="Solder tout ce qu'on doit à {{ lender.name }} en prélevant sur la caisse">
+                <i class="bi bi-check2-all"></i> Tout solder (Caisse)
+              </button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="p-4 text-center text-muted bg-light rounded-3">
+    <i class="bi bi-people fs-3 d-block mb-2 text-secondary"></i>
+    <div class="fw-semibold">Aucun prêt enregistré pour le moment</div>
+    <div class="small">Étiquetez vos dépenses ci-dessous avec le nom du ou des prêteurs pour voir apparaître automatiquement la situation de chaque prêteur.</div>
+  </div>
+  {% endif %}
+</div>
+
+<!-- 3. Bandeau si un prêteur spécifique est filtré -->
+{% if selected_lender_summary %}
+<div class="app-alert app-alert-info mb-4 d-flex flex-wrap align-items-center justify-content-between gap-3">
+  <div class="d-flex align-items-center gap-3">
+    <i class="bi bi-person-badge-fill fs-3 text-primary"></i>
+    <div>
+      <div class="fw-bold fs-6">Fiche Prêteur : {{ selected_lender_summary.name }}</div>
+      <div class="small">
+        Total avancé : <strong>{{ selected_lender_summary.borrowed|floatformat:0 }} FCFA</strong> ·
+        Déjà remboursé : <strong class="text-success">{{ selected_lender_summary.repaid|floatformat:0 }} FCFA</strong> ·
+        Reste à lui devoir : <strong class="text-danger">{{ selected_lender_summary.remaining|floatformat:0 }} FCFA</strong>
+      </div>
+    </div>
+  </div>
+  <a href="{% url 'finance-dashboard' %}" class="btn-app-secondary btn-sm">
+    <i class="bi bi-arrow-counterclockwise"></i> Réinitialiser le filtre
+  </a>
+</div>
+{% endif %}
+
+<!-- 4. Filtres du Journal de Trésorerie & Dépenses -->
+<div class="app-card mb-4" id="expensesLedger">
+  <form method="get" class="row g-2 align-items-end">
+    <div class="col-md-4">
+      <label class="form-label mb-1" for="filter-finance-batch">
+        <i class="bi bi-layers me-1 text-muted"></i> Lot concerné
+      </label>
+      <select id="filter-finance-batch" name="batch" class="form-select form-select-sm" onchange="this.form.submit()">
+        <option value="">Tous les lots & exploitation</option>
+        <option value="general" {% if selected_batch == 'general' %}selected{% endif %}>Charges fixes ferme (sans lot)</option>
+        {% for b in batches %}
+          <option value="{{ b.pk }}" {% if selected_batch == b.pk|stringformat:'s' %}selected{% endif %}>{{ b.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="col-md-3">
+      <label class="form-label mb-1" for="filter-finance-lender">
+        <i class="bi bi-person-check me-1 text-muted"></i> Filtrer par prêteur
+      </label>
+      <select id="filter-finance-lender" name="lender" class="form-select form-select-sm" onchange="this.form.submit()">
+        <option value="">Tous les prêteurs</option>
+        {% for l_name in existing_lenders %}
+          <option value="{{ l_name }}" {% if selected_lender|lower == l_name|lower %}selected{% endif %}>{{ l_name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="col-md-3">
+      <label class="form-label mb-1" for="filter-finance-source">
+        <i class="bi bi-tag me-1 text-muted"></i> Origine des fonds / Statut
+      </label>
+      <select id="filter-finance-source" name="source" class="form-select form-select-sm" onchange="this.form.submit()">
+        <option value="">Toutes les dépenses</option>
+        <option value="cash" {% if selected_source == 'cash' %}selected{% endif %}>Pris dans la caisse (Trésorerie)</option>
+        <option value="loan" {% if selected_source == 'loan' %}selected{% endif %}>En prêt (À rembourser)</option>
+        <option value="repaid" {% if selected_source == 'repaid' %}selected{% endif %}>Prêts remboursés</option>
+        <option value="untagged" {% if selected_source == 'untagged' %}selected{% endif %}>Non étiquetées ({{ summary.untagged_expenses_count }})</option>
+      </select>
+    </div>
+
+    <div class="col-md-2">
+      <a href="{% url 'finance-dashboard' %}" class="btn-app-secondary btn-sm w-100 justify-content-center">
+        <i class="bi bi-arrow-counterclockwise"></i> Reset
+      </a>
+    </div>
+  </form>
+</div>
+
+<!-- 5. Table des Dépenses avec Étiquetage Multi-Prêteurs / Caisse -->
+<div class="app-card">
+  <div class="card-header-clean flex-wrap">
+    <div>
+      <h2 class="card-title-clean">
+        <i class="bi bi-tags-fill"></i>
+        <span>Étiquetage des Dépenses (Caisse vs Prêteurs)</span>
+      </h2>
+      <div class="small text-muted mt-1">
+        Associez à chaque dépense la caisse ou le(s) prêteur(s) qui ont fourni l'argent (ex: 100 000 F avec A + 200 000 F avec B + 200 000 F avec C).
+      </div>
+    </div>
+    {% if summary.untagged_expenses_count > 0 %}
+      <span class="app-badge badge-warning-soft">
+        <i class="bi bi-exclamation-circle"></i>
+        {{ summary.untagged_expenses_count }} dépense(s) à étiqueter ({{ summary.untagged_expenses_amount|floatformat:0 }} FCFA)
+      </span>
+    {% else %}
+      <span class="app-badge badge-success-soft">
+        <i class="bi bi-check-circle-fill"></i>
+        100% des dépenses sont étiquetées
+      </span>
+    {% endif %}
+  </div>
+
+  <datalist id="lendersAutocomplete">
+    {% for lender in existing_lenders %}
+      <option value="{{ lender }}"></option>
+    {% endfor %}
+  </datalist>
+
+  {% if expenses %}
+  <div class="app-table-wrapper">
+    <table class="app-table">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Dépense & Catégorie</th>
+          <th class="text-end">Montant Total</th>
+          <th>Origine des fonds / Prêteur(s)</th>
+          {% if user.is_staff %}
+          <th class="text-end">Étiqueter / Actions</th>
+          {% endif %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for expense in expenses %}
+        <tr>
+          <td class="text-nowrap align-top">{{ expense.date|date:'d/m/Y' }}</td>
+          <td class="align-top">
+            <div class="fw-bold text-dark">{{ expense.designation }}</div>
+            <div class="d-flex flex-wrap gap-1 mt-1">
+              <span class="app-badge badge-neutral-soft py-0 px-2" style="font-size: 0.72rem;">
+                {{ expense.category.name }}
+              </span>
+              {% if expense.batch %}
+                <span class="app-badge badge-success-soft py-0 px-2" style="font-size: 0.72rem;">
+                  {{ expense.batch.name }}
+                </span>
+              {% endif %}
+            </div>
+          </td>
+          <td class="text-end fw-bold fs-6 text-dark text-nowrap align-top">
+            {{ expense.amount|floatformat:0 }} <small class="text-muted fw-normal">FCFA</small>
+          </td>
+          <td class="align-top">
+            {% if expense.fundings.all %}
+              <div class="d-flex flex-column gap-2">
+                {% for f in expense.fundings.all %}
+                  <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 p-2 rounded border bg-light">
+                    <div>
+                      {% if f.source_type == 'cash' %}
+                        <span class="app-badge badge-info-soft">
+                          <i class="bi bi-safe2 me-1"></i> Pris dans la caisse{% if f.lender_name %} ({{ f.lender_name }}){% endif %}
+                        </span>
+                        <strong class="ms-2 text-dark">{{ f.amount|floatformat:0 }} FCFA</strong>
+                      {% elif f.source_type == 'repaid' %}
+                        <span class="app-badge badge-success-soft">
+                          <i class="bi bi-check-circle-fill me-1"></i> Prêteur : {{ f.lender_name|default:'Tiers' }} (Remboursé{% if f.repaid_from_cash %} via Caisse{% endif %})
+                        </span>
+                        <strong class="ms-2 text-success">{{ f.amount|floatformat:0 }} FCFA</strong>
+                      {% else %}
+                        <span class="app-badge badge-warning-soft">
+                          <i class="bi bi-person-exclamation me-1"></i> Prêteur : <strong>{{ f.lender_name|default:'Tiers' }}</strong> (En prêt)
+                        </span>
+                        <strong class="ms-2 text-danger">{{ f.amount|floatformat:0 }} FCFA</strong>
+                        {% if f.amount_repaid > 0 %}
+                          <span class="small text-muted ms-1">(déjà remb. : {{ f.amount_repaid|floatformat:0 }} F · reste : {{ f.remaining_to_repay|floatformat:0 }} F)</span>
+                        {% endif %}
+                      {% endif %}
+                    </div>
+
+                    {% if user.is_staff %}
+                    <div class="d-flex align-items-center gap-1">
+                      {% if f.source_type == 'loan' %}
+                        <form method="post" action="{% url 'funding-repay' f.pk %}" class="d-inline">
+                          {% csrf_token %}
+                          <input type="hidden" name="action" value="repay">
+                          <input type="hidden" name="from_cash" value="1">
+                          <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                          <button type="submit" class="btn btn-sm btn-outline-success py-0 px-2" title="Rembourser ce prêteur en prenant l'argent dans la caisse">
+                            <i class="bi bi-check2"></i> Rembourser (Caisse)
+                          </button>
+                        </form>
+                        <form method="post" action="{% url 'funding-repay' f.pk %}" class="d-inline">
+                          {% csrf_token %}
+                          <input type="hidden" name="action" value="repay">
+                          <input type="hidden" name="from_cash" value="0">
+                          <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                          <button type="submit" class="btn btn-sm btn-outline-secondary py-0 px-2" title="Marquer comme remboursé sans toucher à la caisse">
+                            Hors caisse
+                          </button>
+                        </form>
+                      {% elif f.source_type == 'repaid' %}
+                        <form method="post" action="{% url 'funding-repay' f.pk %}" class="d-inline">
+                          {% csrf_token %}
+                          <input type="hidden" name="action" value="unrepay">
+                          <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                          <button type="submit" class="btn btn-sm btn-link text-muted py-0 px-1 small text-decoration-none" title="Remettre en prêt non remboursé">
+                            <i class="bi bi-arrow-counterclockwise"></i> Annuler remb.
+                          </button>
+                        </form>
+                      {% endif %}
+                    </div>
+                    {% endif %}
+                  </div>
+                {% endfor %}
+              </div>
+            {% else %}
+              <span class="app-badge badge-neutral-soft text-muted">
+                <i class="bi bi-question-circle me-1"></i> Non étiquetée (Cliquez sur « Étiqueter » pour définir Caisse ou Prêteur)
+              </span>
+            {% endif %}
+
+            <!-- Collapsible Inline Quick-Tagging Form for this Expense -->
+            {% if user.is_staff %}
+            <div class="collapse mt-2" id="tagCollapse{{ expense.pk }}">
+              <form method="post" action="{% url 'expense-funding-update' expense.pk %}" class="p-3 rounded border bg-white shadow-sm quick-tag-form" data-expense-amount="{{ expense.amount|floatformat:0 }}">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                <div class="d-flex align-items-center justify-content-between mb-2">
+                  <span class="small fw-bold text-primary">
+                    <i class="bi bi-sliders me-1"></i> Répartition du financement ({{ expense.amount|floatformat:0 }} FCFA)
+                  </span>
+                  <button type="button" class="btn btn-sm btn-outline-primary py-0 px-2 add-inline-funding-btn">
+                    <i class="bi bi-plus-lg"></i> + Ajouter un prêteur
+                  </button>
+                </div>
+
+                <div class="inline-funding-rows d-flex flex-column gap-2">
+                  {% if expense.fundings.all %}
+                    {% for f in expense.fundings.all %}
+                    <div class="row g-2 align-items-center inline-funding-row">
+                      <div class="col-sm-4">
+                        <select name="funding_source[]" class="form-select form-select-sm">
+                          <option value="cash" {% if f.source_type == 'cash' %}selected{% endif %}>Pris dans la caisse</option>
+                          <option value="loan" {% if f.source_type == 'loan' %}selected{% endif %}>En prêt (À rembourser)</option>
+                          <option value="repaid" {% if f.source_type == 'repaid' %}selected{% endif %}>Prêt déjà remboursé</option>
+                        </select>
+                      </div>
+                      <div class="col-sm-4">
+                        <input type="text" name="funding_lender[]" list="lendersAutocomplete" class="form-control form-control-sm"
+                               placeholder="Nom du prêteur (ex: A, B...)" value="{{ f.lender_name }}">
+                      </div>
+                      <div class="col-sm-3">
+                        <input type="number" name="funding_amount[]" step="any" min="0" class="form-control form-control-sm inline-amt-input"
+                               placeholder="Montant" value="{{ f.amount|floatformat:0 }}">
+                      </div>
+                      <div class="col-sm-1 text-end">
+                        <button type="button" class="btn btn-sm btn-outline-danger py-0 px-2 remove-inline-row-btn" title="Supprimer cette ligne">
+                          <i class="bi bi-x"></i>
+                        </button>
+                      </div>
+                    </div>
+                    {% endfor %}
+                  {% else %}
+                    <div class="row g-2 align-items-center inline-funding-row">
+                      <div class="col-sm-4">
+                        <select name="funding_source[]" class="form-select form-select-sm">
+                          <option value="cash">Pris dans la caisse</option>
+                          <option value="loan" selected>En prêt (À rembourser)</option>
+                          <option value="repaid">Prêt déjà remboursé</option>
+                        </select>
+                      </div>
+                      <div class="col-sm-4">
+                        <input type="text" name="funding_lender[]" list="lendersAutocomplete" class="form-control form-control-sm"
+                               placeholder="Nom du prêteur (ex: A, B...)">
+                      </div>
+                      <div class="col-sm-3">
+                        <input type="number" name="funding_amount[]" step="any" min="0" class="form-control form-control-sm inline-amt-input"
+                               placeholder="Montant" value="{{ expense.amount|floatformat:0 }}">
+                      </div>
+                      <div class="col-sm-1 text-end">
+                        <button type="button" class="btn btn-sm btn-outline-danger py-0 px-2 remove-inline-row-btn" title="Supprimer cette ligne">
+                          <i class="bi bi-x"></i>
+                        </button>
+                      </div>
+                    </div>
+                  {% endif %}
+                </div>
+
+                <div class="d-flex align-items-center justify-content-end gap-2 mt-3 pt-2 border-top">
+                  <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="collapse" data-bs-target="#tagCollapse{{ expense.pk }}">
+                    Fermer
+                  </button>
+                  <button type="submit" class="btn btn-sm btn-primary">
+                    <i class="bi bi-check-lg"></i> Enregistrer l'étiquetage
+                  </button>
+                </div>
+              </form>
+            </div>
+            {% endif %}
+          </td>
+
+          {% if user.is_staff %}
+          <td class="text-end text-nowrap align-top">
+            <button class="btn btn-sm btn-outline-primary py-0 px-2 me-1" type="button"
+                    data-bs-toggle="collapse" data-bs-target="#tagCollapse{{ expense.pk }}"
+                    aria-expanded="false" title="Étiqueter ou répartir entre plusieurs prêteurs / caisse">
+              <i class="bi bi-tag-fill me-1"></i> Étiqueter
+            </button>
+            <a href="{% url 'expense-edit' expense.pk %}?next=finances" class="btn btn-sm btn-outline-secondary py-0 px-2" title="Modifier la dépense complète">
+              <i class="bi bi-pencil"></i>
+            </a>
+          </td>
+          {% endif %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="text-center py-5 text-muted">
+    <i class="bi bi-safe2 fs-1 text-muted d-block mb-3"></i>
+    <div class="fw-bold fs-5">Aucune dépense correspondante</div>
+    <p class="small mb-0">Aucune écriture ne correspond aux filtres sélectionnés.</p>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('.quick-tag-form').forEach(form => {
+    const container = form.querySelector('.inline-funding-rows');
+    const addBtn = form.querySelector('.add-inline-funding-btn');
+    const expTotal = parseFloat((form.dataset.expenseAmount || '0').replace(/\s/g, '')) || 0;
+
+    function bindRemove(row) {
+      const btn = row.querySelector('.remove-inline-row-btn');
+      if (btn) {
+        btn.addEventListener('click', () => {
+          if (container.querySelectorAll('.inline-funding-row').length > 1) {
+            row.remove();
+          }
+        });
+      }
+    }
+
+    container.querySelectorAll('.inline-funding-row').forEach(bindRemove);
+
+    if (addBtn) {
+      addBtn.addEventListener('click', () => {
+        let sum = 0;
+        container.querySelectorAll('.inline-amt-input').forEach(inp => {
+          sum += parseFloat(inp.value) || 0;
+        });
+        const rem = Math.max(expTotal - sum, 0);
+
+        const row = document.createElement('div');
+        row.className = 'row g-2 align-items-center inline-funding-row';
+        row.innerHTML = `
+          <div class="col-sm-4">
+            <select name="funding_source[]" class="form-select form-select-sm">
+              <option value="cash">Pris dans la caisse</option>
+              <option value="loan" selected>En prêt (À rembourser)</option>
+              <option value="repaid">Prêt déjà remboursé</option>
+            </select>
+          </div>
+          <div class="col-sm-4">
+            <input type="text" name="funding_lender[]" list="lendersAutocomplete" class="form-control form-control-sm"
+                   placeholder="Nom du prêteur (ex: A, B...)">
+          </div>
+          <div class="col-sm-3">
+            <input type="number" name="funding_amount[]" step="any" min="0" class="form-control form-control-sm inline-amt-input"
+                   placeholder="Montant" value="${rem > 0 ? rem : ''}">
+          </div>
+          <div class="col-sm-1 text-end">
+            <button type="button" class="btn btn-sm btn-outline-danger py-0 px-2 remove-inline-row-btn" title="Supprimer cette ligne">
+              <i class="bi bi-x"></i>
+            </button>
+          </div>
+        `;
+        bindRemove(row);
+        container.appendChild(row);
+      });
+    }
+  });
+});
+</script>
+{% endblock %}

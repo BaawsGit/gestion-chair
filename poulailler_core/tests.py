@@ -884,6 +884,236 @@ class FeedFormulationAndPreparationTests(TestCase):
         self.batch.refresh_from_db()
         self.assertEqual(self.batch.current_stock, 500)
 
+    def test_giblets_sale_adds_revenue_without_reducing_chicken_stock(self):
+        sale_date = timezone.localdate().isoformat()
+        # 1. Sell all 500 chickens at 2500 FCFA = 1,250,000 FCFA
+        resp_chickens = self.client.post("/ventes/nouvelle/", {
+            "batch": self.batch.pk,
+            "sale_type": Sale.SaleType.CHICKEN,
+            "date": sale_date,
+            "quantity_sold": 500,
+            "unit_price": "2500.00",
+            "customer_name": "Grossiste Volaille",
+            "payment_status": Sale.PaymentStatus.PAID,
+        })
+        self.assertEqual(resp_chickens.status_code, 302)
+        self.batch.refresh_from_db()
+        self.assertEqual(self.batch.sold_count, 500)
+        self.assertEqual(self.batch.current_stock, 0)
+
+        # 2. Even with 0 chickens remaining in stock, sell 10 mixed giblet packs (gésiers, cœurs, foies) at 1500 FCFA = 15,000 FCFA
+        resp_giblets = self.client.post("/ventes/nouvelle/", {
+            "batch": self.batch.pk,
+            "sale_type": Sale.SaleType.GIBLETS,
+            "date": sale_date,
+            "quantity_sold": 10,
+            "total_weight_kg": "12.50",
+            "unit_price": "1500.00",
+            "customer_name": "Restaurant Abats",
+            "payment_status": Sale.PaymentStatus.PAID,
+            "notes": "Gésiers, cœurs et foies mélangés",
+        })
+        self.assertEqual(resp_giblets.status_code, 302)
+
+        # Verify chicken stock and sold_count are untouched (still 500 sold, 0 remaining)
+        self.batch.refresh_from_db()
+        self.assertEqual(self.batch.sold_count, 500)
+        self.assertEqual(self.batch.current_stock, 0)
+
+        # Verify revenue includes both chicken sales (1,250,000) and giblet sales (15,000) = 1,265,000 FCFA
+        fin = batch_financials(self.batch)
+        self.assertEqual(fin["chicken_revenue"], Decimal("1250000.00"))
+        self.assertEqual(fin["giblets_revenue"], Decimal("15000.00"))
+        self.assertEqual(fin["byproduct_revenue"], Decimal("15000.00"))
+        self.assertEqual(fin["revenue"], Decimal("1265000.00"))
+
+        # Verify sales list view and filtering by sale_type=giblets
+        resp_list = self.client.get("/ventes/?sale_type=giblets")
+        self.assertEqual(resp_list.status_code, 200)
+        self.assertContains(resp_list, "Restaurant Abats")
+        self.assertNotContains(resp_list, "Grossiste Volaille")
+
+        # 3. Sell giblets by weight in kg (e.g. 1.5 kg at 2000 FCFA/kg = 3000 FCFA, omitting quantity_sold)
+        resp_giblets_kg = self.client.post("/ventes/nouvelle/", {
+            "batch": self.batch.pk,
+            "sale_type": Sale.SaleType.GIBLETS,
+            "date": sale_date,
+            "total_weight_kg": "1.50",
+            "unit_price": "2000",
+            "customer_name": "Client Abats 1.5kg",
+            "payment_status": Sale.PaymentStatus.PAID,
+        })
+        self.assertEqual(resp_giblets_kg.status_code, 302)
+        giblet_sale_kg = Sale.objects.get(batch=self.batch, customer_name="Client Abats 1.5kg")
+        self.assertEqual(giblet_sale_kg.total_weight_kg, Decimal("1.50"))
+        self.assertEqual(giblet_sale_kg.unit_price, Decimal("2000.00"))
+        self.assertEqual(giblet_sale_kg.total_amount, Decimal("3000.00"))
+
+        # 4. Add a credit sale and verify paid_revenue vs pending_revenue in sale_list
+        self.client.post("/ventes/nouvelle/", {
+            "batch": self.batch.pk,
+            "sale_type": Sale.SaleType.GIBLETS,
+            "date": sale_date,
+            "total_weight_kg": "2.00",
+            "unit_price": "2000",
+            "customer_name": "Client Abats Crédit",
+            "payment_status": Sale.PaymentStatus.CREDIT,
+        })
+        resp_all = self.client.get("/ventes/")
+        self.assertEqual(resp_all.status_code, 200)
+        self.assertEqual(resp_all.context["paid_revenue"], Decimal("1268000.00"))
+        self.assertEqual(resp_all.context["pending_revenue"], Decimal("4000.00"))
+        self.assertEqual(resp_all.context["total_revenue"], Decimal("1272000.00"))
+
+    def test_treasury_caisse_and_multi_lender_expense_tracking(self):
+        today_str = timezone.localdate().isoformat()
+        cat_aliment, _ = ExpenseCategory.objects.get_or_create(name="Aliment")
+        cat_divers, _ = ExpenseCategory.objects.get_or_create(name="Divers")
+
+        # 1. Record the 4 paid sales from the user's scenario: 27500 + 24000 + 1600 + 2000 = 55100 FCFA
+        for amt in [Decimal("27500.00"), Decimal("24000.00"), Decimal("1600.00"), Decimal("2000.00")]:
+            Sale.objects.create(
+                batch=self.batch,
+                sale_type=Sale.SaleType.GIBLETS,
+                date=timezone.localdate(),
+                quantity_sold=1,
+                unit_price=amt,
+                total_amount=amt,
+                payment_status=Sale.PaymentStatus.PAID,
+            )
+
+        # 2. Record two expenses of 2000 FCFA and 2000 FCFA taken from the cash box (Caisse)
+        for i in (1, 2):
+            self.client.post("/depenses/nouvelle/", {
+                "batch": self.batch.pk,
+                "category": cat_divers.pk,
+                "date": today_str,
+                "designation": f"Petite dépense caisse #{i}",
+                "amount": "2000.00",
+                "funding_source[]": ["cash"],
+                "funding_lender[]": ["Gérant"],
+                "funding_amount[]": ["2000.00"],
+            })
+
+        # 3. Record a 500,000 FCFA expense split across 3 lenders: A (100,000), B (200,000), C (200,000)
+        exp_500k = Expense.objects.create(
+            batch=self.batch,
+            category=cat_aliment,
+            date=timezone.localdate(),
+            designation="Fabrication provende 500 000 F",
+            amount=Decimal("500000.00"),
+        )
+        resp_tag = self.client.post(f"/finances/depenses/{exp_500k.pk}/etiqueter/", {
+            "funding_source[]": ["loan", "loan", "loan"],
+            "funding_lender[]": ["A", "B", "C"],
+            "funding_amount[]": ["100000", "200000", "200000"],
+        })
+        self.assertEqual(resp_tag.status_code, 302)
+
+        # 4. Verify Treasury (Caisse) and Lenders Summary on /finances/
+        resp_fin = self.client.get("/finances/")
+        self.assertEqual(resp_fin.status_code, 200)
+        summary = resp_fin.context["summary"]
+
+        # Paid sales = 55,100 FCFA; taken from cash = 4,000 FCFA -> Remaining in cash = 51,100 FCFA!
+        self.assertEqual(summary["paid_sales_total"], Decimal("55100.00"))
+        self.assertEqual(summary["cash_expenses_total"], Decimal("4000.00"))
+        self.assertEqual(summary["cash_balance"], Decimal("51100.00"))
+
+        # Borrowed = 500,000 FCFA across A (100k), B (200k), C (200k)
+        self.assertEqual(summary["total_borrowed"], Decimal("500000.00"))
+        self.assertEqual(summary["total_remaining_debt"], Decimal("500000.00"))
+        lenders_by_name = {item["name"]: item for item in summary["lenders_breakdown"]}
+        self.assertEqual(lenders_by_name["A"]["remaining"], Decimal("100000.00"))
+        self.assertEqual(lenders_by_name["B"]["remaining"], Decimal("200000.00"))
+        self.assertEqual(lenders_by_name["C"]["remaining"], Decimal("200000.00"))
+
+        # 5. Filter by lender A
+        resp_lender_a = self.client.get("/finances/?lender=A")
+        self.assertEqual(resp_lender_a.status_code, 200)
+        self.assertEqual(resp_lender_a.context["selected_lender_summary"]["remaining"], Decimal("100000.00"))
+
+        # 6. Reimburse lender A (outside cash box) and check remaining debt drops to 400,000 FCFA
+        self.client.post("/finances/preteurs/rembourser/", {
+            "lender_name": "A",
+            "from_cash": "0",
+        })
+        resp_after = self.client.get("/finances/")
+        summary_after = resp_after.context["summary"]
+        self.assertEqual(summary_after["total_repaid"], Decimal("100000.00"))
+        self.assertEqual(summary_after["total_remaining_debt"], Decimal("400000.00"))
+        self.assertEqual(summary_after["cash_balance"], Decimal("51100.00"))
+
+    def test_partial_bird_payment_22_of_40_and_subsequent_update_impacts_finances(self):
+        today_str = timezone.localdate().isoformat()
+
+        # 1. Customer orders 40 birds at 2500 FCFA (total 100,000 FCFA), but only pays for 22 birds (55,000 FCFA)
+        resp_create = self.client.post("/ventes/nouvelle/", {
+            "batch": self.batch.pk,
+            "sale_type": Sale.SaleType.CHICKEN,
+            "date": today_str,
+            "quantity_sold": 40,
+            "unit_price": "2500",
+            "customer_name": "Client 40 Sujets",
+            "payment_status": Sale.PaymentStatus.PARTIAL,
+            "quantity_paid": 22,
+        })
+        self.assertEqual(resp_create.status_code, 302)
+        sale = Sale.objects.get(batch=self.batch, customer_name="Client 40 Sujets")
+        self.assertEqual(sale.quantity_sold, 40)
+        self.assertEqual(sale.quantity_paid, 22)
+        self.assertEqual(sale.quantity_unpaid, 18)
+        self.assertEqual(sale.payment_status, Sale.PaymentStatus.PARTIAL)
+        self.assertEqual(sale.total_amount, Decimal("100000.00"))
+        self.assertEqual(sale.effective_amount_paid, Decimal("55000.00"))
+        self.assertEqual(sale.remaining_amount_due, Decimal("45000.00"))
+
+        # Verify Sales page KPIs
+        resp_sales = self.client.get("/ventes/")
+        self.assertEqual(resp_sales.context["total_revenue"], Decimal("100000.00"))
+        self.assertEqual(resp_sales.context["paid_revenue"], Decimal("55000.00"))
+        self.assertEqual(resp_sales.context["pending_revenue"], Decimal("45000.00"))
+        self.assertEqual(resp_sales.context["total_paid_birds"], 22)
+        self.assertEqual(resp_sales.context["total_unpaid_birds"], 18)
+
+        # Verify Finances treasury balance reflects the 22 paid birds (55,000 FCFA)
+        resp_fin = self.client.get("/finances/")
+        self.assertEqual(resp_fin.context["summary"]["paid_sales_total"], Decimal("55000.00"))
+        self.assertEqual(resp_fin.context["summary"]["pending_sales_total"], Decimal("45000.00"))
+        self.assertEqual(resp_fin.context["summary"]["cash_balance"], Decimal("55000.00"))
+
+        # 2. Later, the money for the remaining 18 birds arrives -> user edits the sale to quantity_paid=40
+        resp_edit = self.client.post(f"/ventes/{sale.pk}/modifier/", {
+            "batch": self.batch.pk,
+            "sale_type": Sale.SaleType.CHICKEN,
+            "date": today_str,
+            "quantity_sold": 40,
+            "unit_price": "2500",
+            "total_amount": "100000.00",
+            "customer_name": "Client 40 Sujets",
+            "payment_status": Sale.PaymentStatus.PARTIAL,
+            "quantity_paid": 40,
+            "amount_paid": "55000.00",
+        })
+        self.assertEqual(resp_edit.status_code, 302)
+        sale.refresh_from_db()
+        self.assertEqual(sale.payment_status, Sale.PaymentStatus.PAID)
+        self.assertEqual(sale.quantity_paid, 40)
+        self.assertEqual(sale.quantity_unpaid, 0)
+        self.assertEqual(sale.effective_amount_paid, Decimal("100000.00"))
+        self.assertEqual(sale.remaining_amount_due, Decimal("0.00"))
+
+        # Verify Finances treasury balance immediately updated to 100,000 FCFA!
+        resp_fin_after = self.client.get("/finances/")
+        self.assertEqual(resp_fin_after.context["summary"]["paid_sales_total"], Decimal("100000.00"))
+        self.assertEqual(resp_fin_after.context["summary"]["pending_sales_total"], Decimal("0.00"))
+        self.assertEqual(resp_fin_after.context["summary"]["cash_balance"], Decimal("100000.00"))
+
+
+
+
+
+
 
 
 

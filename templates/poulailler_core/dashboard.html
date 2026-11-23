@@ -193,11 +193,14 @@
       </div>
     </div>
     <div class="kpi-value text-warning-emphasis">{{ financials.revenue|floatformat:0 }} <small class="fs-6 text-muted">FCFA</small></div>
-    <div class="kpi-footer">
+    <div class="kpi-footer flex-wrap gap-1">
       <span class="app-badge badge-warning-soft">
         <i class="bi bi-receipt"></i>
         Ventes enregistrées
       </span>
+      {% if financials.byproduct_revenue > 0 %}
+      <span class="text-muted small ms-auto">dont abats : {{ financials.byproduct_revenue|floatformat:0 }} F</span>
+      {% endif %}
     </div>
   </article>
 

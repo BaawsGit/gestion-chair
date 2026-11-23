@@ -61,20 +61,183 @@
 {% block scripts %}
 <script>
 document.addEventListener('DOMContentLoaded', () => {
+  const saleTypeSelect = document.getElementById('id_sale_type');
   const qtyInput = document.getElementById('id_quantity_sold');
+  const weightInput = document.getElementById('id_total_weight_kg');
   const priceInput = document.getElementById('id_unit_price');
   const totalInput = document.getElementById('id_total_amount');
+  const statusSelect = document.getElementById('id_payment_status');
+  const qtyPaidInput = document.getElementById('id_quantity_paid');
+  const amtPaidInput = document.getElementById('id_amount_paid');
 
-  if (qtyInput && priceInput && totalInput) {
-    const updateTotal = () => {
-      const qty = parseFloat(qtyInput.value);
-      const price = parseFloat(priceInput.value);
-      if (!isNaN(qty) && qty > 0 && !isNaN(price) && price > 0) {
+  // Create live payment breakdown banner if on SaleForm
+  let breakdownBanner = null;
+  if (amtPaidInput) {
+    breakdownBanner = document.createElement('div');
+    breakdownBanner.className = 'p-3 mt-2 rounded-3 border bg-light small';
+    breakdownBanner.id = 'salePaymentBreakdown';
+    amtPaidInput.closest('div').appendChild(breakdownBanner);
+  }
+
+  const renderBreakdown = () => {
+    if (!breakdownBanner || !totalInput) return;
+    const saleType = saleTypeSelect ? saleTypeSelect.value : 'chicken';
+    const qty = qtyInput ? (parseInt(qtyInput.value, 10) || 0) : 0;
+    const qtyPaid = qtyPaidInput ? (parseInt(qtyPaidInput.value, 10) || 0) : 0;
+    const total = parseFloat(totalInput.value) || 0;
+    const amtPaid = amtPaidInput ? (parseFloat(amtPaidInput.value) || 0) : 0;
+    const remAmt = Math.max(total - amtPaid, 0);
+    const remQty = Math.max(qty - qtyPaid, 0);
+
+    const fmt = (v) => window.formatNumber ? window.formatNumber(Math.round(v)) : Math.round(v);
+
+    if (saleType === 'chicken' && qty > 0) {
+      breakdownBanner.innerHTML = `
+        <div class="fw-bold text-dark mb-1"><i class="bi bi-calculator me-1 text-primary"></i> Récapitulatif de la commande (${qty} sujets) :</div>
+        <div class="d-flex flex-wrap gap-3">
+          <span class="text-success fw-semibold">
+            <i class="bi bi-check-circle-fill me-1"></i> Déjà payé (en caisse) : ${qtyPaid} sujet(s) → ${fmt(amtPaid)} FCFA
+          </span>
+          <span class="${remAmt > 0 ? 'text-danger fw-semibold' : 'text-muted'}">
+            <i class="bi bi-hourglass-split me-1"></i> Reste à payer : ${remQty} sujet(s) → ${fmt(remAmt)} FCFA
+          </span>
+        </div>
+      `;
+    } else {
+      breakdownBanner.innerHTML = `
+        <div class="d-flex flex-wrap gap-3">
+          <span class="text-success fw-semibold">
+            <i class="bi bi-check-circle-fill me-1"></i> Encaissé en caisse : ${fmt(amtPaid)} FCFA
+          </span>
+          <span class="${remAmt > 0 ? 'text-danger fw-semibold' : 'text-muted'}">
+            <i class="bi bi-hourglass-split me-1"></i> Reste à payer : ${fmt(remAmt)} FCFA
+          </span>
+        </div>
+      `;
+    }
+  };
+
+  const updateTotal = (source) => {
+    if (!priceInput || !totalInput) return;
+    const saleType = saleTypeSelect ? saleTypeSelect.value : 'chicken';
+    const price = parseFloat(priceInput.value);
+    const qty = qtyInput ? parseFloat(qtyInput.value) : NaN;
+
+    if (!isNaN(price) && price > 0) {
+      if (saleType === 'giblets') {
+        const weight = weightInput ? parseFloat(weightInput.value) : NaN;
+        if (!isNaN(weight) && weight > 0 && (isNaN(qty) || qty <= 1)) {
+          totalInput.value = (weight * price).toFixed(2);
+        } else if (!isNaN(qty) && qty > 0) {
+          totalInput.value = (qty * price).toFixed(2);
+        }
+      } else if (!isNaN(qty) && qty > 0) {
         totalInput.value = (qty * price).toFixed(2);
       }
+    }
+
+    const total = parseFloat(totalInput.value) || 0;
+    if (statusSelect && qtyPaidInput && amtPaidInput) {
+      if (source === 'status') {
+        if (statusSelect.value === 'paid') {
+          if (!isNaN(qty) && qty > 0) qtyPaidInput.value = qty;
+          if (total > 0) amtPaidInput.value = total.toFixed(2);
+        } else if (statusSelect.value === 'credit') {
+          qtyPaidInput.value = '0';
+          amtPaidInput.value = '0.00';
+        }
+      } else if (source === 'qty_paid') {
+        const qp = parseInt(qtyPaidInput.value, 10);
+        if (!isNaN(qp) && qp >= 0) {
+          if (!isNaN(price) && price > 0) {
+            amtPaidInput.value = Math.min(qp * price, total > 0 ? total : qp * price).toFixed(2);
+          }
+          if (!isNaN(qty) && qty > 0) {
+            if (qp >= qty) {
+              statusSelect.value = 'paid';
+            } else if (qp === 0) {
+              statusSelect.value = 'credit';
+            } else {
+              statusSelect.value = 'partial';
+            }
+          }
+        }
+      } else if (source === 'amt_paid') {
+        const ap = parseFloat(amtPaidInput.value);
+        if (!isNaN(ap) && ap >= 0) {
+          if (!isNaN(price) && price > 0 && saleType === 'chicken') {
+            qtyPaidInput.value = Math.min(Math.floor(ap / price), !isNaN(qty) ? qty : Math.floor(ap / price));
+          }
+          if (total > 0) {
+            if (ap >= total) {
+              statusSelect.value = 'paid';
+            } else if (ap === 0) {
+              statusSelect.value = 'credit';
+            } else {
+              statusSelect.value = 'partial';
+            }
+          }
+        }
+      } else {
+        // Quantity or price changed
+        if (statusSelect.value === 'paid') {
+          if (!isNaN(qty) && qty > 0) qtyPaidInput.value = qty;
+          if (total > 0) amtPaidInput.value = total.toFixed(2);
+        } else if (statusSelect.value === 'partial') {
+          const qp = parseInt(qtyPaidInput.value, 10);
+          if (!isNaN(qp) && qp > 0 && !isNaN(price) && price > 0) {
+            amtPaidInput.value = (qp * price).toFixed(2);
+          }
+        } else if (statusSelect.value === 'credit') {
+          qtyPaidInput.value = '0';
+          amtPaidInput.value = '0.00';
+        }
+      }
+    }
+    renderBreakdown();
+  };
+
+  if (qtyInput) qtyInput.addEventListener('input', () => updateTotal('qty'));
+  if (weightInput) weightInput.addEventListener('input', () => updateTotal('weight'));
+  if (priceInput) priceInput.addEventListener('input', () => updateTotal('price'));
+  if (statusSelect) statusSelect.addEventListener('change', () => updateTotal('status'));
+  if (qtyPaidInput) qtyPaidInput.addEventListener('input', () => updateTotal('qty_paid'));
+  if (amtPaidInput) amtPaidInput.addEventListener('input', () => updateTotal('amt_paid'));
+
+  if (saleTypeSelect && qtyInput && priceInput) {
+    const qtyWrapper = qtyInput.closest('div');
+    const qtyPaidWrapper = qtyPaidInput ? qtyPaidInput.closest('div') : null;
+    const qtyLabel = document.querySelector('label[for="id_quantity_sold"]');
+    const weightLabel = document.querySelector('label[for="id_total_weight_kg"]');
+    const priceLabel = document.querySelector('label[for="id_unit_price"]');
+
+    const updateSaleTypeUI = () => {
+      const val = saleTypeSelect.value;
+      if (val === 'giblets') {
+        if (qtyWrapper) qtyWrapper.style.display = 'none';
+        if (qtyPaidWrapper) qtyPaidWrapper.style.display = 'none';
+        qtyInput.value = '1';
+        if (weightLabel) weightLabel.innerHTML = 'Poids / Quantité d\'abats vendue (en kg) <span class="text-danger">*</span>';
+        if (weightInput && !weightInput.value) weightInput.value = '1';
+        if (priceLabel) priceLabel.innerHTML = 'Prix du kg d\'abats (FCFA) <span class="text-danger">*</span>';
+      } else if (val === 'other') {
+        if (qtyWrapper) qtyWrapper.style.display = '';
+        if (qtyPaidWrapper) qtyPaidWrapper.style.display = '';
+        if (qtyLabel) qtyLabel.innerHTML = 'Quantité vendue (sacs, lots ou unités) <span class="text-danger">*</span>';
+        if (weightLabel) weightLabel.innerHTML = 'Poids total (kg) - optionnel';
+        if (priceLabel) priceLabel.innerHTML = 'Prix unitaire (FCFA) <span class="text-danger">*</span>';
+        if (!qtyInput.value) qtyInput.value = '1';
+      } else {
+        if (qtyWrapper) qtyWrapper.style.display = '';
+        if (qtyPaidWrapper) qtyPaidWrapper.style.display = '';
+        if (qtyLabel) qtyLabel.innerHTML = 'Quantité commandée / vendue (nombre de poulets) <span class="text-danger">*</span>';
+        if (weightLabel) weightLabel.innerHTML = 'Poids total pesé (kg) - optionnel';
+        if (priceLabel) priceLabel.innerHTML = 'Prix unitaire par poulet (FCFA) <span class="text-danger">*</span>';
+      }
+      updateTotal('init');
     };
-    qtyInput.addEventListener('input', updateTotal);
-    priceInput.addEventListener('input', updateTotal);
+    saleTypeSelect.addEventListener('change', updateSaleTypeUI);
+    updateSaleTypeUI();
   }
 });
 </script>

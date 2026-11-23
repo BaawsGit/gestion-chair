@@ -9,11 +9,15 @@
     </div>
     <h1 class="page-title">Ventes & Sorties du Poulailler</h1>
     <p class="page-subtitle">
-      Suivi des enlèvements de poulets de chair, des pesées et du recouvrement des paiements.
+      Suivi des ventes de poulets de chair, des abats mélangés (gésiers, cœurs & foies) et du recouvrement des paiements.
     </p>
   </div>
   <div class="page-header-actions">
     {% if user.is_staff %}
+    <a class="btn-app-secondary" href="{% url 'sale-create' %}?type=giblets" title="Enregistrer une vente de gésiers, cœurs et foies mélangés">
+      <i class="bi bi-basket2-fill text-warning"></i>
+      <span>Vente d'abats (gésiers/cœurs/foies)</span>
+    </a>
     <a class="btn-app-primary" href="{% url 'sale-create' %}">
       <i class="bi bi-plus-circle-fill"></i>
       <span>Nouvelle vente</span>
@@ -23,24 +27,59 @@
 </div>
 
 <!-- Sales KPIs -->
-<section class="metrics-row" aria-label="Statistiques des ventes">
+<section class="metrics-row" aria-label="Statistiques des ventes" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));">
   <article class="kpi-card kpi-card-amber">
     <div class="kpi-top">
-      <span class="kpi-label">Chiffre d'Affaires Réalisé</span>
+      <span class="kpi-label">Chiffre d'Affaires Total</span>
       <div class="kpi-icon">
         <i class="bi bi-cash-stack"></i>
       </div>
     </div>
     <div class="kpi-value text-warning-emphasis">{{ total_revenue|floatformat:0 }} <small class="fs-6 text-muted">FCFA</small></div>
-    <div class="kpi-footer">
+    <div class="kpi-footer flex-wrap gap-1">
       <span class="app-badge badge-warning-soft">
         <i class="bi bi-receipt"></i>
-        {{ sales|length }} transaction(s) enregistrée(s)
+        {{ sales|length }} transaction(s)
       </span>
+      {% if giblets_revenue > 0 %}
+      <span class="text-muted small ms-auto">dont abats : <strong>{{ giblets_revenue|floatformat:0 }} F</strong></span>
+      {% endif %}
     </div>
   </article>
 
   <article class="kpi-card kpi-card-emerald">
+    <div class="kpi-top">
+      <span class="kpi-label">Montant Réellement Payé</span>
+      <div class="kpi-icon">
+        <i class="bi bi-check2-circle"></i>
+      </div>
+    </div>
+    <div class="kpi-value text-success">{{ paid_revenue|floatformat:0 }} <small class="fs-6 text-muted">FCFA</small></div>
+    <div class="kpi-footer">
+      <span class="app-badge badge-success-soft">
+        <i class="bi bi-check-circle-fill"></i>
+        {{ paid_count }} vente(s) encaissée(s)
+      </span>
+    </div>
+  </article>
+
+  <article class="kpi-card kpi-card-rose">
+    <div class="kpi-top">
+      <span class="kpi-label">En Attente de Paiement</span>
+      <div class="kpi-icon">
+        <i class="bi bi-hourglass-split"></i>
+      </div>
+    </div>
+    <div class="kpi-value {% if pending_revenue > 0 %}text-danger{% else %}text-muted{% endif %}">{{ pending_revenue|floatformat:0 }} <small class="fs-6 text-muted">FCFA</small></div>
+    <div class="kpi-footer">
+      <span class="app-badge {% if pending_revenue > 0 %}badge-danger-soft{% else %}badge-neutral-soft{% endif %}">
+        <i class="bi bi-clock-history"></i>
+        {{ pending_count }} crédit(s) / avance(s)
+      </span>
+    </div>
+  </article>
+
+  <article class="kpi-card kpi-card-indigo">
     <div class="kpi-top">
       <span class="kpi-label">Poulets Vendus</span>
       <div class="kpi-icon">
@@ -48,29 +87,31 @@
       </div>
     </div>
     <div class="kpi-value text-success">{{ total_sold }} <small class="fs-6 text-muted">sujets</small></div>
-    <div class="kpi-footer">
+    <div class="kpi-footer flex-wrap gap-1">
       <span class="app-badge badge-success-soft">
         <i class="bi bi-check-lg"></i>
-        Sortis du cheptel
+        {{ chicken_revenue|floatformat:0 }} FCFA
       </span>
+      {% if total_unpaid_birds > 0 %}
+      <span class="text-muted small ms-auto">
+        <strong class="text-success">{{ total_paid_birds }} payés</strong> · <strong class="text-danger">{{ total_unpaid_birds }} restants</strong>
+      </span>
+      {% endif %}
     </div>
   </article>
 
-  <article class="kpi-card kpi-card-indigo">
+  <article class="kpi-card kpi-card-amber">
     <div class="kpi-top">
-      <span class="kpi-label">Biomasse & Poids Moyen</span>
+      <span class="kpi-label">Abats (Gésiers, Cœurs & Foies)</span>
       <div class="kpi-icon">
-        <i class="bi bi-speedometer2"></i>
+        <i class="bi bi-basket2-fill"></i>
       </div>
     </div>
-    <div class="kpi-value">{{ total_weight|floatformat:1 }} <small class="fs-6 text-muted">kg</small></div>
+    <div class="kpi-value text-dark">{{ giblets_revenue|floatformat:0 }} <small class="fs-6 text-muted">FCFA</small></div>
     <div class="kpi-footer">
-      <span class="text-muted">
-        {% if total_sold %}
-          Moyenne : <strong>{{ total_weight|floatformat:2 }} kg / sujet</strong>
-        {% else %}
-          —
-        {% endif %}
+      <span class="app-badge badge-neutral-soft">
+        <i class="bi bi-bag-check"></i>
+        {{ giblets_count }} vente(s) · {% if giblets_weight > 0 %}{{ giblets_weight|floatformat:1 }} kg{% else %}{{ giblets_qty }} lot{{ giblets_qty|pluralize }}{% endif %}
       </span>
     </div>
   </article>
@@ -78,8 +119,8 @@
 
 <!-- Filter Card -->
 <div class="app-card mb-4">
-  <form method="get" class="row g-2 align-items-center">
-    <div class="col-md-6">
+  <form method="get" class="row g-2 align-items-end">
+    <div class="col-md-4">
       <label class="form-label mb-1" for="filter-sale-batch">
         <i class="bi bi-filter me-1 text-muted"></i> Filtrer par lot de production
       </label>
@@ -92,8 +133,34 @@
         {% endfor %}
       </select>
     </div>
-    <div class="col-md-3 d-flex align-items-end">
-      <a href="{% url 'sale-list' %}" class="btn-app-secondary btn-sm">
+    <div class="col-md-3">
+      <label class="form-label mb-1" for="filter-sale-type">
+        <i class="bi bi-tags me-1 text-muted"></i> Type de vente / Produit
+      </label>
+      <select id="filter-sale-type" name="sale_type" class="form-select form-select-sm" onchange="this.form.submit()">
+        <option value="">Tous les produits (Poulets + Abats + Autres)</option>
+        {% for code, label in sale_types %}
+          <option value="{{ code }}" {% if selected_sale_type == code %}selected{% endif %}>
+            {{ label }}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label mb-1" for="filter-payment-status">
+        <i class="bi bi-credit-card me-1 text-muted"></i> Statut de paiement
+      </label>
+      <select id="filter-payment-status" name="payment_status" class="form-select form-select-sm" onchange="this.form.submit()">
+        <option value="">Tous (Payé + Crédit)</option>
+        {% for code, label in payment_statuses %}
+          <option value="{{ code }}" {% if selected_payment_status == code %}selected{% endif %}>
+            {{ label }}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-2 d-flex align-items-end">
+      <a href="{% url 'sale-list' %}" class="btn-app-secondary btn-sm w-100 justify-content-center">
         <i class="bi bi-arrow-counterclockwise"></i> Réinitialiser
       </a>
     </div>
@@ -116,6 +183,7 @@
         <tr>
           <th>Date</th>
           <th>Lot</th>
+          <th>Produit vendu</th>
           <th>Client</th>
           <th>Quantité</th>
           <th>Poids total</th>
@@ -136,13 +204,46 @@
               <i class="bi bi-layers me-1"></i> {{ sale.batch.name }}
             </span>
           </td>
+          <td>
+            {% if sale.sale_type == 'giblets' %}
+              <span class="app-badge badge-warning-soft" title="Abats mélangés : gésiers, cœurs et foies">
+                <i class="bi bi-basket2-fill me-1"></i> Abats (gésiers, cœurs & foies)
+              </span>
+            {% elif sale.sale_type == 'other' %}
+              <span class="app-badge badge-info-soft">
+                <i class="bi bi-box-seam me-1"></i> Autre produit
+              </span>
+            {% else %}
+              <span class="app-badge badge-success-soft">
+                <i class="bi bi-feather me-1"></i> Poulets
+              </span>
+            {% endif %}
+          </td>
           <td class="fw-bold text-dark">
             {{ sale.customer_name|default:'Vente comptoir' }}
             {% if sale.notes %}
               <div class="small text-muted fw-normal">{{ sale.notes }}</div>
             {% endif %}
           </td>
-          <td class="fw-bold text-success">{{ sale.quantity_sold }} sujets</td>
+          <td class="fw-bold {% if sale.sale_type == 'chicken' %}text-success{% else %}text-dark{% endif %}">
+            {% if sale.sale_type == 'giblets' %}
+              {% if sale.total_weight_kg and sale.quantity_sold == 1 %}
+                {{ sale.total_weight_kg|floatformat:1 }} kg
+              {% else %}
+                {{ sale.quantity_sold }} lot{{ sale.quantity_sold|pluralize }}
+              {% endif %}
+            {% elif sale.sale_type == 'other' %}
+              {{ sale.quantity_sold }} unité{{ sale.quantity_sold|pluralize }}
+            {% else %}
+              {{ sale.quantity_sold }} sujet{{ sale.quantity_sold|pluralize }}
+              {% if sale.quantity_unpaid > 0 %}
+                <div class="small fw-normal mt-1">
+                  <span class="badge bg-success-subtle text-success border border-success-subtle">{{ sale.effective_quantity_paid }} payé{{ sale.effective_quantity_paid|pluralize }}</span>
+                  <span class="badge bg-danger-subtle text-danger border border-danger-subtle">{{ sale.quantity_unpaid }} non payé{{ sale.quantity_unpaid|pluralize }}</span>
+                </div>
+              {% endif %}
+            {% endif %}
+          </td>
           <td>
             {% if sale.total_weight_kg %}
               {{ sale.total_weight_kg|floatformat:1 }} kg
@@ -150,24 +251,45 @@
               <span class="text-muted">—</span>
             {% endif %}
           </td>
-          <td>{{ sale.unit_price|floatformat:0 }} FCFA</td>
+          <td>
+            {{ sale.unit_price|floatformat:0 }} FCFA{% if sale.sale_type == 'giblets' and sale.total_weight_kg and sale.quantity_sold == 1 %}<small class="text-muted">/kg</small>{% endif %}
+          </td>
           <td class="text-end fw-bold fs-6 text-dark text-nowrap">
             {{ sale.total_amount|floatformat:0 }} <small class="text-muted fw-normal">FCFA</small>
+            {% if sale.remaining_amount_due > 0 %}
+              <div class="small fw-normal">
+                <span class="text-success">Payé : {{ sale.effective_amount_paid|floatformat:0 }} F</span>
+                ·
+                <span class="text-danger fw-semibold">Reste : {{ sale.remaining_amount_due|floatformat:0 }} F</span>
+              </div>
+            {% endif %}
           </td>
           <td class="text-center">
-            {% if sale.payment_status == 'paid' %}
+            {% if sale.remaining_amount_due == 0 %}
               <span class="app-badge badge-success-soft">
                 <i class="bi bi-check-circle-fill"></i> Payé
               </span>
+            {% elif sale.effective_amount_paid > 0 %}
+              <span class="app-badge badge-warning-soft" title="Payé : {{ sale.effective_amount_paid|floatformat:0 }} FCFA | Reste : {{ sale.remaining_amount_due|floatformat:0 }} FCFA">
+                <i class="bi bi-pie-chart-fill"></i> Partiel ({{ sale.effective_quantity_paid }}/{{ sale.quantity_sold }})
+              </span>
             {% else %}
-              <span class="app-badge badge-warning-soft">
-                <i class="bi bi-hourglass-split"></i> Crédit / Avance
+              <span class="app-badge badge-danger-soft">
+                <i class="bi bi-hourglass-split"></i> Crédit (0/{{ sale.quantity_sold }})
               </span>
             {% endif %}
           </td>
           {% if user.is_staff %}
           <td class="text-end text-nowrap">
-            <a href="{% url 'sale-edit' sale.pk %}" class="btn btn-sm btn-outline-secondary py-0 px-2 me-1" title="Modifier cette vente">
+            {% if sale.remaining_amount_due > 0 %}
+            <form method="post" action="{% url 'sale-settle' sale.pk %}" class="d-inline">
+              {% csrf_token %}
+              <button type="submit" class="btn btn-sm btn-outline-success py-0 px-2 me-1" title="Tout solder (les {{ sale.quantity_unpaid }} sujets restants / {{ sale.remaining_amount_due|floatformat:0 }} FCFA ont été payés)">
+                <i class="bi bi-check2-all"></i> Solder
+              </button>
+            </form>
+            {% endif %}
+            <a href="{% url 'sale-edit' sale.pk %}" class="btn btn-sm btn-outline-secondary py-0 px-2 me-1" title="Modifier cette vente (ex: ajuster le nombre de sujets payés)">
               <i class="bi bi-pencil"></i>
             </a>
             <a href="{% url 'sale-delete' sale.pk %}" class="btn btn-sm btn-outline-danger py-0 px-2" title="Supprimer cette vente">

@@ -33,6 +33,9 @@ class StyledModelForm(forms.ModelForm):
                 field.widget.attrs["class"] = "form-select"
             else:
                 field.widget.attrs["class"] = "form-control"
+            if isinstance(field.widget, forms.NumberInput):
+                if str(field.widget.attrs.get("min", "")) == "0.01" and field.widget.attrs.get("step") not in (None, "0.01", "any"):
+                    field.widget.attrs["min"] = "0"
 
 
 class BatchForm(StyledModelForm):
@@ -313,46 +316,212 @@ class FeedInventoryForm(StyledModelForm):
 class SaleForm(StyledModelForm):
     class Meta:
         model = Sale
-        fields = ["batch", "date", "quantity_sold", "total_weight_kg", "unit_price", "total_amount", "customer_name", "payment_status", "notes"]
-        widgets = {"date": forms.DateInput(format="%Y-%m-%d", attrs={"type": "date"})}
+        fields = [
+            "batch",
+            "sale_type",
+            "date",
+            "quantity_sold",
+            "total_weight_kg",
+            "unit_price",
+            "total_amount",
+            "customer_name",
+            "payment_status",
+            "quantity_paid",
+            "amount_paid",
+            "notes",
+        ]
+        widgets = {
+            "date": forms.DateInput(format="%Y-%m-%d", attrs={"type": "date"}),
+            "sale_type": forms.Select(attrs={"id": "id_sale_type"}),
+            "quantity_sold": forms.NumberInput(attrs={"min": "1", "step": "1", "id": "id_quantity_sold"}),
+            "total_weight_kg": forms.NumberInput(attrs={"min": "0", "step": "0.01", "id": "id_total_weight_kg", "placeholder": "ex. 1 ou 1.5"}),
+            "unit_price": forms.NumberInput(attrs={"min": "0", "step": "any", "id": "id_unit_price", "placeholder": "ex. 2000 ou 2500"}),
+            "total_amount": forms.NumberInput(attrs={"min": "0", "step": "any", "id": "id_total_amount"}),
+            "payment_status": forms.Select(attrs={"id": "id_payment_status"}),
+            "quantity_paid": forms.NumberInput(attrs={"min": "0", "step": "1", "id": "id_quantity_paid", "placeholder": "ex. 22 sur 40"}),
+            "amount_paid": forms.NumberInput(attrs={"min": "0", "step": "any", "id": "id_amount_paid", "placeholder": "Montant déjà encaissé"}),
+        }
+        labels = {
+            "sale_type": "Type de vente / Produit",
+            "quantity_sold": "Quantité commandée / vendue (nombre de poulets)",
+            "total_weight_kg": "Poids vendu (kg)",
+            "unit_price": "Prix unitaire / Prix du kg (FCFA)",
+            "total_amount": "Montant total de la commande (FCFA)",
+            "payment_status": "Statut du paiement",
+            "quantity_paid": "Nombre de sujets déjà payés",
+            "amount_paid": "Montant déjà encaissé en caisse (FCFA)",
+        }
+        help_texts = {
+            "sale_type": "Choisissez « Abats mélangés (gésiers, cœurs & foies) » pour vendre au kg ou par lot sans diminuer l'effectif vivant des poulets.",
+            "quantity_sold": "Nombre total de poulets livrés / commandés (ex: 40 sujets).",
+            "total_weight_kg": "Obligatoire pour une vente d'abats au kg (ex: 1 kg, 1.5 kg, 2 kg...). Optionnel pour les poulets.",
+            "unit_price": "Prix d'un poulet ou prix d'un kilogramme d'abats (modifiable librement selon le client).",
+            "total_amount": "Montant total de la vente (Quantité totale × Prix unitaire).",
+            "payment_status": "Choisissez « Paiement partiel / Avance » si seulement une partie de la commande (ex: 22 sujets sur 40) a été payée.",
+            "quantity_paid": "Ex: si le client prend 40 sujets mais n'en paie que 22 aujourd'hui, indiquez 22. L'argent des 22 sera comptabilisé en caisse et les 18 restants seront en attente.",
+            "amount_paid": "Calculé automatiquement (Nombre de sujets payés × Prix unitaire), ou saisissez directement la somme encaissée.",
+        }
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.fields["sale_type"].required = False
+        self.fields["sale_type"].initial = Sale.SaleType.CHICKEN
+        self.fields["quantity_sold"].required = False
+        self.fields["quantity_paid"].required = False
+        self.fields["amount_paid"].required = False
+        # Override min="0.01" injected by ModelForm from MinValueValidator so HTML5 accepts any integer or decimal
+        for fname in ("total_weight_kg", "unit_price", "total_amount", "amount_paid"):
+            if fname in self.fields:
+                self.fields[fname].widget.attrs["min"] = "0"
+                self.fields[fname].widget.attrs["step"] = "any"
         if not self.instance.pk:
             if "date" in self.fields and not self.initial.get("date"):
                 self.fields["date"].initial = timezone.localdate()
-            if "batch" in self.fields and "initial" not in kwargs:
+            if "batch" in self.fields and not self.initial.get("batch"):
                 active_batch = Batch.objects.filter(status=Batch.Status.ACTIVE).first()
                 if active_batch:
                     self.fields["batch"].initial = active_batch
-
-    def clean_quantity_sold(self):
-        quantity = self.cleaned_data["quantity_sold"]
-        batch = self.cleaned_data.get("batch")
-        if batch:
-            available = batch.current_stock
-            if self.instance.pk and self.instance.batch_id == batch.pk:
-                available += self.instance.quantity_sold
-            if quantity > available:
-                raise ValidationError(f"La quantité dépasse l'effectif disponible ({available}).")
-        return quantity
+            if "quantity_sold" in self.fields and not self.initial.get("quantity_sold"):
+                self.fields["quantity_sold"].initial = 1
 
     def clean(self):
         cleaned_data = super().clean()
+        sale_type = cleaned_data.get("sale_type") or Sale.SaleType.CHICKEN
+        cleaned_data["sale_type"] = sale_type
         quantity = cleaned_data.get("quantity_sold")
+        total_weight_kg = cleaned_data.get("total_weight_kg")
+        batch = cleaned_data.get("batch")
         unit_price = cleaned_data.get("unit_price")
         total_amount = cleaned_data.get("total_amount")
+        payment_status = cleaned_data.get("payment_status") or Sale.PaymentStatus.PAID
+        quantity_paid = cleaned_data.get("quantity_paid")
+        amount_paid = cleaned_data.get("amount_paid")
 
-        if quantity and unit_price:
-            calculated_total = (unit_price * Decimal(quantity)).quantize(Decimal("0.01"))
+        if sale_type == Sale.SaleType.CHICKEN:
+            if not quantity or quantity < 1:
+                self.add_error("quantity_sold", "Veuillez indiquer le nombre de poulets vendus.")
+                return cleaned_data
+            if batch:
+                available = batch.current_stock
+                if (
+                    self.instance.pk
+                    and self.instance.batch_id == batch.pk
+                    and self.instance.sale_type == Sale.SaleType.CHICKEN
+                ):
+                    available += self.instance.quantity_sold
+                if quantity > available:
+                    self.add_error(
+                        "quantity_sold",
+                        f"La quantité dépasse l'effectif disponible ({available}).",
+                    )
+        else:
+            if not quantity or quantity < 1:
+                quantity = 1
+                cleaned_data["quantity_sold"] = 1
+
+        if unit_price:
+            if sale_type == Sale.SaleType.GIBLETS and total_weight_kg and total_weight_kg > 0 and quantity == 1:
+                multiplier = total_weight_kg
+            else:
+                multiplier = Decimal(quantity or 1)
+
+            calculated_total = (unit_price * multiplier).quantize(Decimal("0.01"))
             if not total_amount:
+                total_amount = calculated_total
                 cleaned_data["total_amount"] = calculated_total
             elif self.instance.pk:
                 qty_changed = quantity != self.instance.quantity_sold
+                weight_changed = total_weight_kg != self.instance.total_weight_kg
                 price_changed = unit_price != self.instance.unit_price
                 total_unchanged = total_amount == self.instance.total_amount
-                if (qty_changed or price_changed) and total_unchanged:
+                if (qty_changed or weight_changed or price_changed) and total_unchanged:
+                    total_amount = calculated_total
                     cleaned_data["total_amount"] = calculated_total
+
+        if quantity_paid is not None and quantity and quantity_paid > quantity:
+            self.add_error(
+                "quantity_paid",
+                f"Le nombre de sujets payés ({quantity_paid}) ne peut pas dépasser la quantité vendue ({quantity}).",
+            )
+            return cleaned_data
+
+        # Reconcile payment_status, quantity_paid, and amount_paid
+        if total_amount and unit_price and quantity:
+            status_explicitly_set_to_paid = (
+                self.instance.pk
+                and payment_status == Sale.PaymentStatus.PAID
+                and self.instance.payment_status != Sale.PaymentStatus.PAID
+                and quantity_paid == self.instance.quantity_paid
+            )
+            qty_paid_changed = (
+                not self.instance.pk and quantity_paid is not None
+            ) or (
+                self.instance.pk and quantity_paid != self.instance.quantity_paid
+            )
+            amt_paid_changed = (
+                not self.instance.pk and amount_paid is not None
+            ) or (
+                self.instance.pk and amount_paid != self.instance.amount_paid
+            )
+
+            if status_explicitly_set_to_paid:
+                cleaned_data["payment_status"] = Sale.PaymentStatus.PAID
+                cleaned_data["quantity_paid"] = quantity
+                cleaned_data["amount_paid"] = total_amount
+            elif qty_paid_changed and quantity_paid is not None:
+                if quantity_paid >= quantity:
+                    cleaned_data["payment_status"] = Sale.PaymentStatus.PAID
+                    cleaned_data["quantity_paid"] = quantity
+                    cleaned_data["amount_paid"] = total_amount
+                elif quantity_paid == 0:
+                    if amt_paid_changed and amount_paid and amount_paid > 0:
+                        cleaned_data["payment_status"] = (
+                            Sale.PaymentStatus.PAID if amount_paid >= total_amount else Sale.PaymentStatus.PARTIAL
+                        )
+                        cleaned_data["amount_paid"] = min(amount_paid, total_amount)
+                    else:
+                        cleaned_data["payment_status"] = Sale.PaymentStatus.CREDIT
+                        cleaned_data["quantity_paid"] = 0
+                        cleaned_data["amount_paid"] = Decimal("0.00")
+                else:
+                    # 0 < quantity_paid < quantity (e.g. 22 paid out of 40!)
+                    cleaned_data["payment_status"] = Sale.PaymentStatus.PARTIAL
+                    cleaned_data["quantity_paid"] = quantity_paid
+                    if not amt_paid_changed or not amount_paid:
+                        cleaned_data["amount_paid"] = (unit_price * Decimal(quantity_paid)).quantize(Decimal("0.01"))
+                    else:
+                        cleaned_data["amount_paid"] = min(amount_paid, total_amount)
+            elif amt_paid_changed and amount_paid is not None:
+                if amount_paid >= total_amount:
+                    cleaned_data["payment_status"] = Sale.PaymentStatus.PAID
+                    cleaned_data["quantity_paid"] = quantity
+                    cleaned_data["amount_paid"] = total_amount
+                elif amount_paid <= Decimal("0.00"):
+                    cleaned_data["payment_status"] = Sale.PaymentStatus.CREDIT
+                    cleaned_data["quantity_paid"] = 0
+                    cleaned_data["amount_paid"] = Decimal("0.00")
+                else:
+                    cleaned_data["payment_status"] = Sale.PaymentStatus.PARTIAL
+                    cleaned_data["amount_paid"] = amount_paid
+                    if unit_price > 0:
+                        cleaned_data["quantity_paid"] = min(int(amount_paid // unit_price), quantity)
+            else:
+                # Neither quantity_paid nor amount_paid was specifically changed
+                if payment_status == Sale.PaymentStatus.PAID:
+                    cleaned_data["quantity_paid"] = quantity
+                    cleaned_data["amount_paid"] = total_amount
+                elif payment_status == Sale.PaymentStatus.CREDIT:
+                    cleaned_data["quantity_paid"] = 0
+                    cleaned_data["amount_paid"] = Decimal("0.00")
+                elif payment_status == Sale.PaymentStatus.PARTIAL:
+                    if quantity_paid is not None and 0 < quantity_paid < quantity:
+                        cleaned_data["amount_paid"] = (unit_price * Decimal(quantity_paid)).quantize(Decimal("0.01"))
+                    elif amount_paid is not None and Decimal("0.00") < amount_paid < total_amount:
+                        cleaned_data["amount_paid"] = amount_paid
+                    else:
+                        cleaned_data["quantity_paid"] = 0
+                        cleaned_data["amount_paid"] = Decimal("0.00")
+
         return cleaned_data
 
 

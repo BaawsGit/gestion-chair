@@ -14,6 +14,10 @@
   </div>
   <div class="page-header-actions">
     {% if user.is_staff %}
+    <a class="btn-app-secondary" href="{% url 'finance-dashboard' %}">
+      <i class="bi bi-safe2 text-primary"></i>
+      <span>Trésorerie & Prêteurs</span>
+    </a>
     <a class="btn-app-primary" href="{% url 'expense-create' %}">
       <i class="bi bi-plus-circle-fill"></i>
       <span>Nouvelle dépense</span>
@@ -99,6 +103,7 @@
           <th>Désignation</th>
           <th>Catégorie</th>
           <th>Affectation</th>
+          <th>Financement / Prêteur(s)</th>
           <th class="text-end">Montant</th>
           <th class="text-center">Justificatif</th>
           {% if user.is_staff %}
@@ -143,6 +148,31 @@
               <span class="text-muted small">
                 <i class="bi bi-house me-1"></i> Fixe exploitation
               </span>
+            {% endif %}
+          </td>
+          <td>
+            {% if expense.fundings.all %}
+              <div class="d-flex flex-wrap gap-1">
+                {% for f in expense.fundings.all %}
+                  {% if f.source_type == 'cash' %}
+                    <span class="app-badge badge-info-soft" title="Prélevé dans la caisse de la ferme">
+                      <i class="bi bi-safe2 me-1"></i> Caisse{% if f.lender_name %} ({{ f.lender_name }}){% endif %}{% if expense.fundings.all|length > 1 %} : {{ f.amount|floatformat:0 }} F{% endif %}
+                    </span>
+                  {% elif f.source_type == 'repaid' %}
+                    <a href="{% url 'finance-dashboard' %}?lender={{ f.lender_name|urlencode }}" class="app-badge badge-success-soft text-decoration-none" title="Prêt déjà remboursé">
+                      <i class="bi bi-check-circle-fill me-1"></i> {{ f.lender_name|default:'Prêteur' }} ({{ f.amount|floatformat:0 }} F · Remboursé)
+                    </a>
+                  {% else %}
+                    <a href="{% url 'finance-dashboard' %}?lender={{ f.lender_name|urlencode }}" class="app-badge badge-warning-soft text-decoration-none" title="En prêt - Cliquez pour voir le compte de ce prêteur">
+                      <i class="bi bi-person-exclamation me-1"></i> Prêt {{ f.lender_name|default:'Tiers' }} : {{ f.amount|floatformat:0 }} F
+                    </a>
+                  {% endif %}
+                {% endfor %}
+              </div>
+            {% else %}
+              <a href="{% url 'expense-edit' expense.pk %}" class="text-muted small text-decoration-none" title="Préciser qui a financé cette dépense">
+                <i class="bi bi-tag me-1"></i> Non étiqueté
+              </a>
             {% endif %}
           </td>
           <td class="text-end fw-bold fs-6 text-dark text-nowrap">

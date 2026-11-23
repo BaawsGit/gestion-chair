@@ -4,6 +4,7 @@ from .models import (
     Batch,
     Expense,
     ExpenseCategory,
+    ExpenseFunding,
     FeedConsumption,
     FeedFormula,
     FeedFormulaItem,
@@ -43,12 +44,19 @@ class BatchAdmin(admin.ModelAdmin):
     inlines = (TreatmentLogInline,)
 
 
+class ExpenseFundingInline(admin.TabularInline):
+    model = ExpenseFunding
+    extra = 1
+    fields = ("source_type", "lender_name", "amount", "amount_repaid", "repaid_from_cash", "repaid_date")
+
+
 @admin.register(Expense)
 class ExpenseAdmin(admin.ModelAdmin):
     list_display = ("date", "designation", "category", "batch", "amount")
     list_filter = ("category", "date")
     search_fields = ("designation", "batch__name")
     date_hierarchy = "date"
+    inlines = (ExpenseFundingInline,)
 
 
 @admin.register(ExpenseCategory)
@@ -98,8 +106,8 @@ class TreatmentLogAdmin(admin.ModelAdmin):
 
 @admin.register(Sale)
 class SaleAdmin(admin.ModelAdmin):
-    list_display = ("date", "batch", "quantity_sold", "total_weight_kg", "total_amount", "customer_name", "payment_status")
-    list_filter = ("payment_status", "date")
+    list_display = ("date", "batch", "sale_type", "quantity_sold", "total_weight_kg", "total_amount", "customer_name", "payment_status")
+    list_filter = ("sale_type", "payment_status", "date")
     search_fields = ("batch__name", "customer_name")
     date_hierarchy = "date"
 

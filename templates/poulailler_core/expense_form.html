@@ -109,6 +109,41 @@
     </div>
   </div>
 
+  <!-- 1b. Origine des fonds & Financement (Caisse ou Prêteurs multiples) -->
+  <div class="card border border-primary border-opacity-50 rounded-3 p-4 mb-4 bg-light shadow-sm">
+    <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2 border-bottom pb-2">
+      <div>
+        <h3 class="h6 mb-0 text-primary fw-bold">
+          <i class="bi bi-safe2 me-2"></i>Origine des fonds & Prêteurs (Trésorerie / Remboursements)
+        </h3>
+        <div class="small text-muted">
+          Indiquez si l'argent a été pris dans la caisse ou avancé par un ou plusieurs prêteurs (ex: 100 000 F avec A + 200 000 F avec B...).
+        </div>
+      </div>
+      <button type="button" class="btn btn-sm btn-outline-primary fw-semibold" id="addFundingRowBtn">
+        <i class="bi bi-plus-circle me-1"></i> Ajouter un prêteur / source
+      </button>
+    </div>
+
+    <datalist id="existingLendersList">
+      {% for lender in existing_lenders %}
+        <option value="{{ lender }}"></option>
+      {% endfor %}
+    </datalist>
+
+    <div id="fundingRowsContainer" class="d-flex flex-column gap-2 mt-2">
+      <!-- Dynamic rows inserted by JS -->
+    </div>
+
+    <div class="d-flex flex-wrap align-items-center justify-content-between mt-3 pt-2 border-top small">
+      <span class="text-muted">
+        <i class="bi bi-info-circle me-1"></i>
+        Ce suivi se répercute automatiquement dans la section <strong>Finances</strong> (solde de la caisse et dettes par prêteur).
+      </span>
+      <span class="fw-bold" id="fundingTotalBadge">Total ventilé : 0 FCFA</span>
+    </div>
+  </div>
+
   <!-- 2. Section Conditionnelle : Impact Stock Aliment -->
   <div class="card border border-success rounded-3 p-4 mb-4 bg-light shadow-sm" id="feedStockSyncSection" style="display: none;">
     <div class="d-flex align-items-center justify-content-between mb-3 border-bottom pb-2">
@@ -405,6 +440,146 @@
     }
 
     updateCategoryVisibility();
+
+    // =========================================================================
+    // Multi-Lender / Cash Funding Rows Management
+    // =========================================================================
+    const fundingContainer = document.getElementById('fundingRowsContainer');
+    const addFundingBtn = document.getElementById('addFundingRowBtn');
+    const fundingTotalBadge = document.getElementById('fundingTotalBadge');
+    const existingFundings = {{ existing_fundings_json|default:"null"|safe }};
+
+    function createFundingRow(data) {
+      const row = document.createElement('div');
+      row.className = 'row g-2 align-items-end bg-white p-2 rounded border funding-row';
+      const src = (data && data.source_type) ? data.source_type : 'cash';
+      const lender = (data && data.lender_name) ? data.lender_name : '';
+      const amt = (data && data.amount !== undefined && data.amount !== '') ? data.amount : '';
+
+      row.innerHTML = `
+        <div class="col-md-4">
+          <label class="form-label small fw-semibold mb-1">Source de l'argent</label>
+          <select name="funding_source[]" class="form-select form-select-sm funding-source-select">
+            <option value="cash" ${src === 'cash' ? 'selected' : ''}>Pris dans la caisse (Trésorerie)</option>
+            <option value="loan" ${src === 'loan' ? 'selected' : ''}>En prêt / Avancé par un prêteur (À rembourser)</option>
+            <option value="repaid" ${src === 'repaid' ? 'selected' : ''}>Prêt déjà remboursé</option>
+          </select>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label small fw-semibold mb-1 funding-lender-label">
+            ${src === 'cash' ? 'Qui a effectué la dépense (Optionnel)' : 'Nom du prêteur <span class="text-danger">*</span>'}
+          </label>
+          <input type="text" name="funding_lender[]" list="existingLendersList" class="form-control form-control-sm funding-lender-input"
+                 placeholder="${src === 'cash' ? 'Ex: Gérant / Caisse' : 'Ex: Prêteur A, B, C...'}" value="${lender.replace(/"/g, '&quot;')}">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label small fw-semibold mb-1">Montant (FCFA)</label>
+          <input type="number" name="funding_amount[]" step="any" min="0" class="form-control form-control-sm funding-amount-input"
+                 placeholder="Montant" value="${amt}">
+        </div>
+        <div class="col-md-1 text-end">
+          <button type="button" class="btn btn-sm btn-outline-danger remove-funding-row" title="Retirer cette ligne">
+            <i class="bi bi-x-lg"></i>
+          </button>
+        </div>
+      `;
+
+      const srcSelect = row.querySelector('.funding-source-select');
+      const lenderLabel = row.querySelector('.funding-lender-label');
+      const lenderInput = row.querySelector('.funding-lender-input');
+      const amtInput = row.querySelector('.funding-amount-input');
+      const removeBtn = row.querySelector('.remove-funding-row');
+
+      srcSelect.addEventListener('change', () => {
+        if (srcSelect.value === 'cash') {
+          lenderLabel.innerHTML = 'Qui a effectué la dépense (Optionnel)';
+          lenderInput.placeholder = 'Ex: Gérant / Caisse';
+        } else {
+          lenderLabel.innerHTML = 'Nom du prêteur <span class="text-danger">*</span>';
+          lenderInput.placeholder = 'Ex: Prêteur A, B, C...';
+        }
+        updateFundingTotals();
+      });
+
+      amtInput.addEventListener('input', updateFundingTotals);
+
+      removeBtn.addEventListener('click', () => {
+        if (fundingContainer.querySelectorAll('.funding-row').length > 1) {
+          row.remove();
+          updateFundingTotals();
+        } else {
+          srcSelect.value = 'cash';
+          lenderInput.value = '';
+          amtInput.value = inputAmount ? inputAmount.value : '';
+          updateFundingTotals();
+        }
+      });
+
+      fundingContainer.appendChild(row);
+      updateFundingTotals();
+    }
+
+    function updateFundingTotals() {
+      if (!fundingContainer || !fundingTotalBadge) return;
+      const rows = fundingContainer.querySelectorAll('.funding-row');
+      const expAmt = parseFloat(inputAmount ? inputAmount.value : 0) || 0;
+
+      // If single row and its amount matches nothing yet, auto-sync with expense amount
+      if (rows.length === 1) {
+        const singleAmtInput = rows[0].querySelector('.funding-amount-input');
+        if (singleAmtInput && document.activeElement !== singleAmtInput && expAmt > 0) {
+          singleAmtInput.value = expAmt;
+        }
+      }
+
+      let sum = 0;
+      rows.forEach(r => {
+        const val = parseFloat(r.querySelector('.funding-amount-input').value) || 0;
+        sum += val;
+      });
+
+      const formattedSum = window.formatNumber ? window.formatNumber(sum) : sum;
+      const formattedExp = window.formatNumber ? window.formatNumber(expAmt) : expAmt;
+      fundingTotalBadge.textContent = `Total ventilé : ${formattedSum} / ${formattedExp} FCFA`;
+      if (expAmt > 0 && Math.abs(sum - expAmt) > 1) {
+        fundingTotalBadge.className = 'fw-bold text-warning-emphasis';
+      } else {
+        fundingTotalBadge.className = 'fw-bold text-success';
+      }
+    }
+
+    if (fundingContainer) {
+      if (existingFundings && existingFundings.length > 0) {
+        existingFundings.forEach(item => createFundingRow(item));
+      } else {
+        createFundingRow({
+          source_type: 'cash',
+          lender_name: '',
+          amount: inputAmount && inputAmount.value ? inputAmount.value : ''
+        });
+      }
+    }
+
+    if (addFundingBtn) {
+      addFundingBtn.addEventListener('click', () => {
+        const rows = fundingContainer.querySelectorAll('.funding-row');
+        const expAmt = parseFloat(inputAmount ? inputAmount.value : 0) || 0;
+        let currentSum = 0;
+        rows.forEach(r => {
+          currentSum += parseFloat(r.querySelector('.funding-amount-input').value) || 0;
+        });
+        const remaining = Math.max(expAmt - currentSum, 0);
+        createFundingRow({
+          source_type: 'loan',
+          lender_name: '',
+          amount: remaining > 0 ? remaining : ''
+        });
+      });
+    }
+
+    if (inputAmount) {
+      inputAmount.addEventListener('input', updateFundingTotals);
+    }
   });
 </script>
 {% endblock %}

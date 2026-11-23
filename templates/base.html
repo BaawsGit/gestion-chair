@@ -63,15 +63,21 @@
           </a>
         </li>
         <li>
-          <a class="topnav-link {% if request.resolver_match.url_name == 'expense-list' or request.resolver_match.url_name == 'expense-create' %}active{% endif %}" href="{% url 'expense-list' %}">
+          <a class="topnav-link {% if request.resolver_match.url_name == 'expense-list' or request.resolver_match.url_name == 'expense-create' or request.resolver_match.url_name == 'expense-edit' %}active{% endif %}" href="{% url 'expense-list' %}">
             <i class="bi bi-wallet2"></i>
             <span>Dépenses</span>
           </a>
         </li>
         <li>
-          <a class="topnav-link {% if request.resolver_match.url_name == 'sale-list' or request.resolver_match.url_name == 'sale-create' %}active{% endif %}" href="{% url 'sale-list' %}">
+          <a class="topnav-link {% if request.resolver_match.url_name == 'sale-list' or request.resolver_match.url_name == 'sale-create' or request.resolver_match.url_name == 'sale-edit' %}active{% endif %}" href="{% url 'sale-list' %}">
             <i class="bi bi-cart-check"></i>
             <span>Ventes</span>
+          </a>
+        </li>
+        <li>
+          <a class="topnav-link {% if 'finance' in request.resolver_match.url_name %}active{% endif %}" href="{% url 'finance-dashboard' %}">
+            <i class="bi bi-safe2"></i>
+            <span>Finances</span>
           </a>
         </li>
         <li>
